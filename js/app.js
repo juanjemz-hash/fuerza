@@ -2,20 +2,31 @@
  *  app.js — UI y lógica de Fuerza
  * ------------------------------------------------------------------ */
 
-// Lista semilla: bootstrapea el selector la primera vez. Cualquier
-// ejercicio que registres pasa a mostrarse por uso reciente.
-const SEED = [
-  'Press banca', 'Press inclinado mancuernas', 'Aperturas', 'Fondos',
-  'Press militar', 'Elevaciones laterales', 'Face pull',
-  'Dominadas', 'Jalón al pecho', 'Remo con barra', 'Remo mancuerna', 'Curl bíceps',
-  'Sentadilla', 'Prensa', 'Peso muerto rumano', 'Zancadas',
-  'Extensión de cuádriceps', 'Curl femoral', 'Hip thrust', 'Gemelos de pie',
-  'Rueda abdominal', 'Elevaciones de piernas', 'Pallof press',
+// Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
+// cualquier ejercicio que registres pasa a mostrarse por uso reciente.
+// Para cambiar los grupos, edita solo esta lista.
+const GRUPOS = [
+  ['Pecho', ['Press banca', 'Press inclinado mancuernas', 'Aperturas', 'Fondos']],
+  ['Espalda', ['Dominadas', 'Jalón al pecho', 'Remo con barra', 'Remo mancuerna']],
+  ['Hombro', ['Press militar', 'Elevaciones laterales', 'Face pull']],
+  ['Bíceps', ['Curl bíceps', 'Curl martillo']],
+  ['Tríceps', ['Extensiones de tríceps', 'Press francés']],
+  ['Cuádriceps', ['Sentadilla', 'Prensa', 'Extensión de cuádriceps', 'Zancadas']],
+  ['Isquios y glúteo', ['Peso muerto rumano', 'Curl femoral', 'Hip thrust']],
+  ['Gemelos', ['Gemelos de pie']],
+  ['Core', ['Rueda abdominal', 'Elevaciones de piernas', 'Pallof press']],
 ];
+
+const GRUPO_NOMBRES = GRUPOS.map((g) => g[0]);
+const SEED = GRUPOS.flatMap((g) => g[1]);
+const EJ_GRUPO = {};
+GRUPOS.forEach(([grupo, ejs]) => ejs.forEach((e) => { EJ_GRUPO[e] = grupo; }));
+function grupoDe(nombre) { return EJ_GRUPO[nombre] || 'Otros'; }
 
 const state = {
   tab: 'log',
   selectedExercise: null,
+  selectedGroup: null,   // null = "Todos"
   detail: null,
   exerciseList: [],
   usedSet: new Set(),
@@ -113,12 +124,21 @@ async function ensureExerciseList() {
 
 /* ------------------------------ views ---------------------------- */
 
-function buildChips(query) {
+function buildGroupBar(active) {
+  const hasOtros = state.exerciseList.some((n) => grupoDe(n) === 'Otros');
+  const grupos = [...GRUPO_NOMBRES, ...(hasOtros ? ['Otros'] : [])];
+  const chip = (label, val) =>
+    `<button class="groupchip${active === val ? ' is-active' : ''}" data-action="pick-group" data-group="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
+  return chip('Todos', null) + grupos.map((g) => chip(g, g)).join('');
+}
+
+function buildChips(query, group) {
   const q = (query || '').trim().toLowerCase();
   let list = state.exerciseList;
+  if (group) list = list.filter((n) => grupoDe(n) === group);
   if (q) list = list.filter((n) => n.toLowerCase().includes(q));
 
-  let html = list.slice(0, 50).map((n) =>
+  let html = list.slice(0, 60).map((n) =>
     `<button class="chip" data-action="pick-exercise" data-ex="${esc(n)}">${esc(n)}` +
     (state.usedSet.has(n) ? '<span class="chip__recent">✓</span>' : '') +
     `</button>`).join('');
@@ -137,7 +157,8 @@ async function renderLog() {
       <p class="section-label">Registrar serie</p>
       <input class="picker__search" type="text" inputmode="search"
         placeholder="Buscar o añadir ejercicio…" autocomplete="off" />
-      <div class="chips">${buildChips('')}</div>
+      <div class="groupbar">${buildGroupBar(state.selectedGroup)}</div>
+      <div class="chips">${buildChips('', state.selectedGroup)}</div>
     `;
   }
 
@@ -365,6 +386,16 @@ function handleClick(e) {
       break;
     }
 
+    case 'pick-group': {
+      state.selectedGroup = el.dataset.group || null;
+      document.querySelectorAll('.groupchip').forEach((c) => c.classList.remove('is-active'));
+      el.classList.add('is-active');
+      const input = document.querySelector('.picker__search');
+      const chips = document.querySelector('.chips');
+      if (chips) chips.innerHTML = buildChips(input ? input.value : '', state.selectedGroup);
+      break;
+    }
+
     case 'back-to-picker':
       state.selectedExercise = null;
       render();
@@ -449,7 +480,7 @@ async function exportCopy() {
 function handleInput(e) {
   if (e.target.classList.contains('picker__search')) {
     const chips = document.querySelector('.chips');
-    if (chips) chips.innerHTML = buildChips(e.target.value);
+    if (chips) chips.innerHTML = buildChips(e.target.value, state.selectedGroup);
   }
 }
 

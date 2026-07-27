@@ -94,6 +94,21 @@ body {
 .picker__search:focus { outline: 2px solid var(--gold); outline-offset: 1px; border-color: transparent; }
 .picker__search::placeholder { color: var(--muted); }
 
+.groupbar {
+  display: flex; gap: 8px; overflow-x: auto;
+  margin-bottom: 14px; padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.groupbar::-webkit-scrollbar { display: none; }
+.groupchip {
+  flex: 0 0 auto; white-space: nowrap;
+  background: transparent; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--muted); font-size: 13px; font-weight: 600; padding: 7px 14px; cursor: pointer;
+  transition: border-color .12s, color .12s, background .12s;
+}
+.groupchip:active { transform: scale(0.97); }
+.groupchip.is-active { background: var(--gold-soft); border-color: var(--gold); color: var(--gold); }
+
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .chip {
   background: var(--ink-2);
