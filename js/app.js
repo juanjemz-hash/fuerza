@@ -21,7 +21,7 @@ const GRUPO_NOMBRES = GRUPOS.map((g) => g[0]);
 const SEED = GRUPOS.flatMap((g) => g[1]);
 const EJ_GRUPO = {};
 GRUPOS.forEach(([grupo, ejs]) => ejs.forEach((e) => { EJ_GRUPO[e] = grupo; }));
-function grupoDe(nombre) { return EJ_GRUPO[nombre] || 'Otros'; }
+function grupoDe(nombre) { return EJ_GRUPO[nombre] || state.learnedGroups[nombre] || 'Otros'; }
 
 const state = {
   tab: 'log',
@@ -30,6 +30,7 @@ const state = {
   detail: null,
   exerciseList: [],
   usedSet: new Set(),
+  learnedGroups: {},     // ejercicio -> grupo, aprendido de los datos (importados o registrados)
 };
 
 /* ---------------------------- helpers ---------------------------- */
@@ -115,11 +116,18 @@ function download(filename, text, type) {
 }
 
 async function ensureExerciseList() {
-  const used = await DB.usedExercises();
-  const usedSet = new Set(used);
+  const all = await DB.getAll(); // desc por timestamp
+  const used = [];
+  const usedSet = new Set();
+  const learned = {};
+  for (const e of all) {
+    if (!usedSet.has(e.ejercicio)) { usedSet.add(e.ejercicio); used.push(e.ejercicio); }
+    if (e.grupo && !(e.ejercicio in learned)) learned[e.ejercicio] = e.grupo;
+  }
   const rest = SEED.filter((s) => !usedSet.has(s)).sort((a, b) => a.localeCompare(b, 'es'));
   state.exerciseList = [...used, ...rest];
   state.usedSet = usedSet;
+  state.learnedGroups = learned;
 }
 
 /* ------------------------------ views ---------------------------- */
@@ -349,6 +357,7 @@ async function saveSet() {
     fecha: todayISO(),
     timestamp: Date.now(),
     ejercicio: name,
+    grupo: grupoDe(name),
     peso,
     sets,
     rir,
