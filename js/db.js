@@ -46,6 +46,11 @@ const DB = (() => {
     return all.sort((a, b) => b.timestamp - a.timestamp);
   }
 
+  async function get(id) {
+    const db = await open();
+    return reqP(db.transaction(STORE, 'readonly').objectStore(STORE).get(id));
+  }
+
   async function remove(id) {
     const db = await open();
     return reqP(db.transaction(STORE, 'readwrite').objectStore(STORE).delete(id));
@@ -97,14 +102,15 @@ const DB = (() => {
 
   async function exportCSV() {
     const all = await getAll();
-    const head = ['fecha', 'ejercicio', 'peso', 's1', 's2', 's3', 's4', 'rir', 'molestias', 'nota'];
+    const head = ['fecha', 'ejercicio', 'grupo', 'peso', 's1', 's2', 's3', 's4', 's5', 's6', 'rir', 'molestias', 'nota'];
     const esc = (v) => {
       const s = (v ?? '') + '';
       return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
     };
     const rows = all.map((e) => [
-      e.fecha, e.ejercicio, e.peso,
+      e.fecha, e.ejercicio, e.grupo ?? '', e.peso,
       e.sets?.[0] ?? '', e.sets?.[1] ?? '', e.sets?.[2] ?? '', e.sets?.[3] ?? '',
+      e.sets?.[4] ?? '', e.sets?.[5] ?? '',
       e.rir ?? '', e.molestias ?? '', e.nota ?? '',
     ].map(esc).join(','));
     return [head.join(','), ...rows].join('\n');
@@ -121,7 +127,7 @@ const DB = (() => {
   }
 
   return {
-    put, getAll, remove,
+    put, getAll, get, remove,
     usedExercises, lastFor, historyFor,
     exportJSON, exportCSV, importJSON,
   };

@@ -33,6 +33,7 @@ const state = {
   learnedGroups: {},     // ejercicio -> grupo, aprendido de los datos (importados o registrados)
   histGroup: null,       // filtro del historial por grupo muscular
   histExercise: null,    // filtro del historial por ejercicio (dentro del grupo)
+  editId: null,          // id de la serie que se está editando
 };
 
 /* ---------------------------- helpers ---------------------------- */
@@ -126,8 +127,9 @@ async function ensureExerciseList() {
     if (!usedSet.has(e.ejercicio)) { usedSet.add(e.ejercicio); used.push(e.ejercicio); }
     if (e.grupo && !(e.ejercicio in learned)) learned[e.ejercicio] = e.grupo;
   }
-  const rest = SEED.filter((s) => !usedSet.has(s)).sort((a, b) => a.localeCompare(b, 'es'));
-  state.exerciseList = [...used, ...rest];
+  const list = [...used];
+  list.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  state.exerciseList = list;
   state.usedSet = usedSet;
   state.learnedGroups = learned;
 }
@@ -135,8 +137,9 @@ async function ensureExerciseList() {
 /* ------------------------------ views ---------------------------- */
 
 function buildGroupBar(active) {
-  const hasOtros = state.exerciseList.some((n) => grupoDe(n) === 'Otros');
-  const grupos = [...GRUPO_NOMBRES, ...(hasOtros ? ['Otros'] : [])];
+  const present = new Set(state.exerciseList.map((n) => grupoDe(n)));
+  const grupos = [...GRUPO_NOMBRES.filter((g) => present.has(g)),
+    ...(present.has('Otros') ? ['Otros'] : [])];
   const chip = (label, val) =>
     `<button class="groupchip${active === val ? ' is-active' : ''}" data-action="pick-group" data-group="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
   return chip('Todos', null) + grupos.map((g) => chip(g, g)).join('');
@@ -157,7 +160,38 @@ function buildChips(query, group) {
   if (q && !exact) {
     html += `<button class="chip chip--add" data-action="add-exercise">+ Añadir "${esc(query.trim())}"</button>`;
   }
-  return html || '<p class="picker__hint">Sin resultados. Escribe el nombre completo y pulsa Añadir.</p>';
+  return html || '<p class="picker__hint">Escribe el nombre de un ejercicio y pulsa Añadir.</p>';
+}
+
+// Celdas de series (S1–S6). valueFor/phFor devuelven el atributo o ''.
+function setCellsHTML(valueFor, phFor) {
+  return [0, 1, 2, 3, 4, 5].map((i) => `
+    <div class="setcell">
+      <span class="setcell__tag">S${i + 1}</span>
+      <input class="setcell__input num" id="f-s${i + 1}" type="number" inputmode="numeric" ${valueFor(i)} ${phFor(i)} aria-label="Serie ${i + 1}" />
+    </div>`).join('');
+}
+
+function rirHTML(selected) {
+  return [0, 1, 2, 3, 4].map((v) => `
+    <button class="rir__opt num${selected === v ? ' is-active' : ''}" data-action="rir-pick" data-rir="${v}"
+      style="color:${rirColorVar(v)}">${v === 4 ? '4+' : v}</button>`).join('');
+}
+
+// Lee el formulario (lo comparten registrar y editar). Hasta 6 series.
+function readForm() {
+  const peso = parseFloat(document.getElementById('f-peso').value);
+  const sets = [1, 2, 3, 4, 5, 6].map((i) => {
+    const el = document.getElementById('f-s' + i);
+    if (!el) return null;
+    const v = el.value.trim();
+    return v === '' ? null : parseInt(v, 10);
+  });
+  const rirEl = document.querySelector('#f-rir .rir__opt.is-active');
+  const rir = rirEl ? parseInt(rirEl.dataset.rir, 10) : null;
+  const molestias = document.getElementById('f-molestias').value.trim();
+  const nota = document.getElementById('f-nota').value.trim();
+  return { peso, sets, rir, molestias, nota };
 }
 
 async function renderLog() {
@@ -223,22 +257,12 @@ async function renderLog() {
 
     <div class="field">
       <div class="field__label"><span>Series — repeticiones</span></div>
-      <div class="sets">
-        ${[0, 1, 2, 3].map((i) => `
-          <div class="setcell">
-            <span class="setcell__tag">S${i + 1}</span>
-            <input class="setcell__input num" id="f-s${i + 1}" type="number" inputmode="numeric" ${ph(i)} aria-label="Serie ${i + 1}" />
-          </div>`).join('')}
-      </div>
+      <div class="sets">${setCellsHTML(() => '', (i) => ph(i))}</div>
     </div>
 
     <div class="field">
       <div class="field__label"><span>RIR</span><span class="field__note">objetivo 1–2</span></div>
-      <div class="rir" id="f-rir">
-        ${[0, 1, 2, 3, 4].map((v) => `
-          <button class="rir__opt num" data-action="rir-pick" data-rir="${v}"
-            style="color:${rirColorVar(v)}">${v === 4 ? '4+' : v}</button>`).join('')}
-      </div>
+      <div class="rir" id="f-rir">${rirHTML(null)}</div>
       <p class="rir__legend">0 fallo · 1–2 productivo · 3 ligero · 4+ demasiado ligero</p>
     </div>
 
@@ -296,6 +320,7 @@ async function renderHistory() {
         seen.add(e.ejercicio); exs.push(e.ejercicio);
       }
     }
+    exs.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
     const echip = (label, val, active) =>
       `<button class="groupchip${active ? ' is-active' : ''}" data-action="hist-exercise" data-ex="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
     exBar = `<div class="groupbar groupbar--sub">` +
@@ -358,25 +383,73 @@ async function renderDetail(name) {
   const spark = sparkline(asc.map((e) => +e.peso));
 
   const sessions = hist.map((e) => `
-    <div class="detail__session">
+    <div class="detail__session" data-action="edit-open" data-id="${esc(e.id)}" style="cursor:pointer">
       <span class="detail__date">${fmtDate(e.fecha)}</span>
       <span class="detail__stats num">${(+e.peso)} kg <small>· ${setsStr(e.sets) || '—'}${
-        e.rir !== null && e.rir !== undefined ? ` · RIR ${e.rir === 4 ? '4+' : e.rir}` : ''}</small></span>
-      <button class="chip" style="padding:4px 10px;font-size:16px;line-height:1" data-action="delete-entry" data-id="${esc(e.id)}" aria-label="Eliminar">✕</button>
+        e.rir !== null && e.rir !== undefined ? ` · RIR ${e.rir === 4 ? '4+' : e.rir}` : ''}</small><span class="detail__edit" aria-hidden="true">✎</span></span>
     </div>`).join('');
 
   return `
     <button class="log__back" data-action="close-detail">‹ Historial</button>
     <h1 class="log__title">${esc(name)}</h1>
     ${spark ? `<div class="detail__spark">${spark}</div>` : ''}
-    <p class="section-label">${hist.length} sesión${hist.length === 1 ? '' : 'es'}</p>
+    <p class="section-label">${hist.length === 1 ? '1 sesión' : hist.length + ' sesiones'} · toca una para editar</p>
     ${sessions}
+  `;
+}
+
+async function renderEdit(id) {
+  const entry = await DB.get(id);
+  if (!entry) { state.editId = null; return renderDetail(state.detail); }
+
+  return `
+    <button class="log__back" data-action="cancel-edit">‹ Cancelar</button>
+    <h1 class="log__title">Editar · ${esc(entry.ejercicio)}</h1>
+    <p class="section-label">${fmtDate(entry.fecha)}</p>
+
+    <div class="field">
+      <div class="field__label"><span>Peso</span></div>
+      <div class="weight">
+        <button class="weight__step" data-action="weight-step" data-delta="-2.5" aria-label="Bajar 2,5 kg">−</button>
+        <input class="weight__input num" id="f-peso" type="number" inputmode="decimal" step="2.5"
+          value="${(+entry.peso)}" placeholder="0" aria-label="Peso en kg" />
+        <button class="weight__step" data-action="weight-step" data-delta="2.5" aria-label="Subir 2,5 kg">+</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <div class="field__label"><span>Series — repeticiones</span></div>
+      <div class="sets">${setCellsHTML(
+        (i) => (entry.sets && entry.sets[i] != null ? `value="${entry.sets[i]}"` : ''),
+        () => 'placeholder="–"'
+      )}</div>
+    </div>
+
+    <div class="field">
+      <div class="field__label"><span>RIR</span><span class="field__note">objetivo 1–2</span></div>
+      <div class="rir" id="f-rir">${rirHTML(entry.rir != null ? entry.rir : null)}</div>
+      <p class="rir__legend">0 fallo · 1–2 productivo · 3 ligero · 4+ demasiado ligero</p>
+    </div>
+
+    <div class="field">
+      <div class="field__label"><span>Molestias</span><span class="field__note">opcional</span></div>
+      <textarea class="textfield" id="f-molestias" rows="1" placeholder="p. ej. antebrazo / codo">${esc(entry.molestias)}</textarea>
+    </div>
+
+    <div class="field">
+      <div class="field__label"><span>Nota</span><span class="field__note">opcional</span></div>
+      <textarea class="textfield" id="f-nota" rows="1" placeholder="técnica, tempo, sensaciones…">${esc(entry.nota)}</textarea>
+    </div>
+
+    <button class="btn-primary" data-action="save-edit" data-id="${esc(entry.id)}">Guardar cambios</button>
+    <button class="btn-danger" data-action="delete-entry" data-id="${esc(entry.id)}">Eliminar serie</button>
   `;
 }
 
 async function render() {
   const view = document.getElementById('view');
   if (state.tab === 'log') view.innerHTML = await renderLog();
+  else if (state.editId) view.innerHTML = await renderEdit(state.editId);
   else view.innerHTML = state.detail ? await renderDetail(state.detail) : await renderHistory();
 }
 
@@ -384,16 +457,7 @@ async function render() {
 
 async function saveSet() {
   const name = state.selectedExercise;
-  const pesoRaw = document.getElementById('f-peso').value;
-  const peso = parseFloat(pesoRaw);
-  const sets = [1, 2, 3, 4].map((i) => {
-    const v = document.getElementById('f-s' + i).value.trim();
-    return v === '' ? null : parseInt(v, 10);
-  });
-  const rirEl = document.querySelector('#f-rir .rir__opt.is-active');
-  const rir = rirEl ? parseInt(rirEl.dataset.rir, 10) : null;
-  const molestias = document.getElementById('f-molestias').value.trim();
-  const nota = document.getElementById('f-nota').value.trim();
+  const { peso, sets, rir, molestias, nota } = readForm();
 
   if (!name || isNaN(peso) || peso <= 0 || sets.every((s) => s === null)) {
     toast('Añade peso y al menos la serie 1');
@@ -498,6 +562,20 @@ function handleClick(e) {
       render();
       break;
 
+    case 'edit-open':
+      state.editId = el.dataset.id;
+      render();
+      break;
+
+    case 'cancel-edit':
+      state.editId = null;
+      render();
+      break;
+
+    case 'save-edit':
+      saveEdit(el.dataset.id);
+      break;
+
     case 'delete-entry':
       deleteEntry(el.dataset.id);
       break;
@@ -520,11 +598,37 @@ function handleClick(e) {
   }
 }
 
+async function saveEdit(id) {
+  const entry = await DB.get(id);
+  if (!entry) { state.editId = null; return render(); }
+  const { peso, sets, rir, molestias, nota } = readForm();
+
+  if (isNaN(peso) || peso <= 0 || sets.every((s) => s === null)) {
+    toast('Añade peso y al menos la serie 1');
+    return;
+  }
+
+  // se conservan id, fecha, timestamp, ejercicio y grupo; solo cambian los valores
+  const updated = { ...entry, peso, sets, rir, molestias, nota };
+
+  try {
+    await DB.put(updated);
+    toast('Cambios guardados ✓');
+    state.editId = null;
+    await render();
+  } catch (err) {
+    console.error(err);
+    toast('Error al guardar');
+  }
+}
+
 async function deleteEntry(id) {
   if (!window.confirm('¿Eliminar esta serie? No se puede deshacer.')) return;
   try {
     await DB.remove(id);
     toast('Serie eliminada');
+    state.editId = null;
+    await ensureExerciseList();
     await render();
   } catch (err) {
     console.error(err);
