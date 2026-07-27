@@ -392,6 +392,10 @@ async function renderDetail(name) {
   return `
     <button class="log__back" data-action="close-detail">‹ Historial</button>
     <h1 class="log__title">${esc(name)}</h1>
+    <div class="detail__actions">
+      <button class="btn-ghost" data-action="rename-exercise" data-ex="${esc(name)}">✎ Renombrar</button>
+      <button class="btn-ghost" data-action="delete-exercise" data-ex="${esc(name)}">🗑 Eliminar ejercicio</button>
+    </div>
     ${spark ? `<div class="detail__spark">${spark}</div>` : ''}
     <p class="section-label">${hist.length === 1 ? '1 sesión' : hist.length + ' sesiones'} · toca una para editar</p>
     ${sessions}
@@ -567,6 +571,14 @@ function handleClick(e) {
       render();
       break;
 
+    case 'rename-exercise':
+      renameExercisePrompt(el.dataset.ex);
+      break;
+
+    case 'delete-exercise':
+      deleteExercisePrompt(el.dataset.ex);
+      break;
+
     case 'cancel-edit':
       state.editId = null;
       render();
@@ -619,6 +631,40 @@ async function saveEdit(id) {
   } catch (err) {
     console.error(err);
     toast('Error al guardar');
+  }
+}
+
+async function renameExercisePrompt(name) {
+  const nuevo = window.prompt('Nuevo nombre del ejercicio (si coincide con otro, se fusionan):', name);
+  if (nuevo === null) return;
+  const trimmed = nuevo.trim();
+  if (!trimmed || trimmed === name) return;
+  try {
+    const { count, merged } = await DB.renameExercise(name, trimmed);
+    toast(merged ? `Fusionado en "${trimmed}" (${count} series) ✓` : `Renombrado (${count} series) ✓`);
+    state.detail = trimmed;      // seguir viendo el ejercicio, ya con su nuevo nombre
+    state.histExercise = null;   // el filtro por ejercicio del historial ya no aplica
+    await ensureExerciseList();
+    await render();
+  } catch (err) {
+    console.error(err);
+    toast('Error al renombrar');
+  }
+}
+
+async function deleteExercisePrompt(name) {
+  const hist = await DB.historyFor(name);
+  if (!window.confirm(`¿Eliminar el ejercicio "${name}" y sus ${hist.length} series? No se puede deshacer.`)) return;
+  try {
+    const n = await DB.deleteExercise(name);
+    toast(`Eliminado "${name}" (${n} series)`);
+    state.detail = null;
+    state.histExercise = null;
+    await ensureExerciseList();
+    await render();
+  } catch (err) {
+    console.error(err);
+    toast('Error al eliminar');
   }
 }
 

@@ -291,6 +291,7 @@ body {
 
 /* Detail sheet */
 .detail__spark { margin: 6px 0 18px; }
+.detail__actions { display: flex; gap: 8px; margin: 4px 0 18px; }
 .detail__spark svg { width: 100%; height: 56px; display: block; }
 .detail__session {
   display: flex; align-items: baseline; justify-content: space-between; gap: 10px;

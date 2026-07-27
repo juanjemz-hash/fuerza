@@ -126,9 +126,40 @@ const DB = (() => {
     return clean.length;
   }
 
+  // Renombra un ejercicio en todas sus series. Si newName ya existe, se fusionan
+  // (las series renombradas adoptan el grupo del ejercicio destino).
+  async function renameExercise(oldName, newName) {
+    const all = await getAll();
+    const target = all.find((e) => e.ejercicio === newName);
+    const targetGrupo = target ? target.grupo : null;
+    const toUpdate = all
+      .filter((e) => e.ejercicio === oldName)
+      .map((e) => ({ ...e, ejercicio: newName, grupo: targetGrupo || e.grupo }));
+    if (!toUpdate.length) return { count: 0, merged: false };
+    await bulkPut(toUpdate);
+    return { count: toUpdate.length, merged: !!target };
+  }
+
+  // Elimina un ejercicio y todas sus series.
+  async function deleteExercise(name) {
+    const all = await getAll();
+    const ids = all.filter((e) => e.ejercicio === name).map((e) => e.id);
+    if (!ids.length) return 0;
+    const db = await open();
+    const tx = db.transaction(STORE, 'readwrite');
+    const os = tx.objectStore(STORE);
+    ids.forEach((id) => os.delete(id));
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res(ids.length);
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+
   return {
     put, getAll, get, remove,
     usedExercises, lastFor, historyFor,
+    renameExercise, deleteExercise,
     exportJSON, exportCSV, importJSON,
   };
 })();
