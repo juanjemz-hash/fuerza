@@ -31,6 +31,8 @@ const state = {
   exerciseList: [],
   usedSet: new Set(),
   learnedGroups: {},     // ejercicio -> grupo, aprendido de los datos (importados o registrados)
+  histGroup: null,       // filtro del historial por grupo muscular
+  histExercise: null,    // filtro del historial por ejercicio (dentro del grupo)
 };
 
 /* ---------------------------- helpers ---------------------------- */
@@ -264,7 +266,6 @@ async function renderHistory() {
       <button class="btn-ghost" data-action="export-csv">CSV</button>
       <button class="btn-ghost" data-action="import-open">Importar</button>
     </div>
-    <p class="backup-note"><b>Copiar</b> pega tus datos en el chat con tu coach o donde quieras. <b>Exportar</b> guarda un archivo de respaldo — hazlo de vez en cuando: los datos viven solo en este iPhone.</p>
   `;
 
   if (!all.length) {
@@ -275,10 +276,57 @@ async function renderHistory() {
       </div>`;
   }
 
+  // --- barra de grupos (solo los que tienen series) ---
+  const gruposPresentes = new Set(all.map((e) => grupoDe(e.ejercicio)));
+  const ordered = [...GRUPO_NOMBRES.filter((g) => gruposPresentes.has(g)),
+    ...(gruposPresentes.has('Otros') ? ['Otros'] : [])];
+  const gchip = (label, val, active) =>
+    `<button class="groupchip${active ? ' is-active' : ''}" data-action="hist-group" data-group="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
+  const groupBar = `<div class="groupbar">` +
+    gchip('Todos', null, !state.histGroup) +
+    ordered.map((g) => gchip(g, g, state.histGroup === g)).join('') + `</div>`;
+
+  // --- barra de ejercicios del grupo elegido ---
+  let exBar = '';
+  if (state.histGroup) {
+    const exs = [];
+    const seen = new Set();
+    for (const e of all) {
+      if (grupoDe(e.ejercicio) === state.histGroup && !seen.has(e.ejercicio)) {
+        seen.add(e.ejercicio); exs.push(e.ejercicio);
+      }
+    }
+    const echip = (label, val, active) =>
+      `<button class="groupchip${active ? ' is-active' : ''}" data-action="hist-exercise" data-ex="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
+    exBar = `<div class="groupbar groupbar--sub">` +
+      echip('Todos', null, !state.histExercise) +
+      exs.map((n) => echip(n, n, state.histExercise === n)).join('') + `</div>`;
+  }
+
+  const filters = groupBar + exBar;
+
+  // note de respaldo solo en la vista completa (sin filtros), para no estorbar en el uso diario
+  const note = (!state.histGroup && !state.histExercise)
+    ? `<p class="backup-note"><b>Copiar</b> pega tus datos en el chat con tu coach o donde quieras. <b>Exportar</b> guarda un archivo de respaldo — hazlo de vez en cuando: los datos viven solo en este iPhone.</p>`
+    : '';
+
+  // --- aplicar filtros ---
+  let entries = all;
+  if (state.histExercise) entries = entries.filter((e) => e.ejercicio === state.histExercise);
+  else if (state.histGroup) entries = entries.filter((e) => grupoDe(e.ejercicio) === state.histGroup);
+
+  if (!entries.length) {
+    return tools + filters + `
+      <div class="empty">
+        <div class="empty__icon">▤</div>
+        <p class="empty__text">No hay series con este filtro.</p>
+      </div>`;
+  }
+
   // agrupar por fecha (desc, ya viene ordenado por timestamp)
   const groups = [];
   const idx = {};
-  for (const e of all) {
+  for (const e of entries) {
     if (!(e.fecha in idx)) { idx[e.fecha] = groups.length; groups.push({ fecha: e.fecha, items: [] }); }
     groups[idx[e.fecha]].items.push(e);
   }
@@ -299,7 +347,7 @@ async function renderHistory() {
         </div>`).join('')}
     </section>`).join('');
 
-  return tools + body;
+  return tools + filters + note + body;
 }
 
 async function renderDetail(name) {
@@ -427,6 +475,17 @@ function handleClick(e) {
 
     case 'save-set':
       saveSet();
+      break;
+
+    case 'hist-group':
+      state.histGroup = el.dataset.group || null;
+      state.histExercise = null;
+      render();
+      break;
+
+    case 'hist-exercise':
+      state.histExercise = el.dataset.ex || null;
+      render();
       break;
 
     case 'open-detail':
