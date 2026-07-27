@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Fuerza</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <meta name="theme-color" content="#16130E" />
+
+  <!-- iOS standalone -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Fuerza" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+
+  <link rel="stylesheet" href="./css/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar__brand">
+      <span class="topbar__mark" aria-hidden="true"></span>
+      <span class="topbar__name">FUERZA</span>
+    </div>
+    <time id="topbar-date" class="topbar__date"></time>
+  </header>
+
+  <main id="view" class="view" aria-live="polite"></main>
+
+  <nav class="tabbar" role="tablist" aria-label="Secciones">
+    <button class="tabbar__btn" data-tab="log" role="tab" aria-selected="true">
+      <span class="tabbar__icon" aria-hidden="true">＋</span>
+      <span class="tabbar__label">Registrar</span>
+    </button>
+    <button class="tabbar__btn" data-tab="history" role="tab" aria-selected="false">
+      <span class="tabbar__icon" aria-hidden="true">▤</span>
+      <span class="tabbar__label">Historial</span>
+    </button>
+  </nav>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <input type="file" id="import-input" accept="application/json" hidden />
+
+  <script src="./js/db.js"></script>
+  <script src="./js/app.js"></script>
+</body>
+</html>
