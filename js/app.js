@@ -178,6 +178,11 @@ function rirHTML(selected) {
       style="color:${rirColorVar(v)}">${v === 4 ? '4+' : v}</button>`).join('');
 }
 
+function groupPickerHTML(selected) {
+  return [...GRUPO_NOMBRES, 'Otros'].map((g) => `
+    <button class="groupchip${selected === g ? ' is-active' : ''}" data-action="group-pick" data-group="${esc(g)}">${esc(g)}</button>`).join('');
+}
+
 // Lee el formulario (lo comparten registrar y editar). Hasta 6 series.
 function readForm() {
   const peso = parseFloat(document.getElementById('f-peso').value);
@@ -244,6 +249,11 @@ async function renderLog() {
     <button class="log__back" data-action="back-to-picker">‹ Cambiar ejercicio</button>
     <h1 class="log__title">${esc(name)}</h1>
     ${card}
+    ${!state.usedSet.has(name) ? `
+    <div class="field">
+      <div class="field__label"><span>Grupo muscular</span><span class="field__note">ejercicio nuevo</span></div>
+      <div class="groupbar" id="f-grupo">${groupPickerHTML(grupoDe(name) !== 'Otros' ? grupoDe(name) : null)}</div>
+    </div>` : ''}
 
     <div class="field">
       <div class="field__label"><span>Peso</span></div>
@@ -396,6 +406,11 @@ async function renderDetail(name) {
       <button class="btn-ghost" data-action="rename-exercise" data-ex="${esc(name)}">✎ Renombrar</button>
       <button class="btn-ghost" data-action="delete-exercise" data-ex="${esc(name)}">🗑 Eliminar ejercicio</button>
     </div>
+    <div class="field" style="margin-bottom:18px">
+      <div class="field__label"><span>Grupo muscular</span></div>
+      <div class="groupbar" id="d-grupo">${[...GRUPO_NOMBRES, 'Otros'].map((g) =>
+        `<button class="groupchip${grupoDe(name) === g ? ' is-active' : ''}" data-action="detail-group" data-group="${esc(g)}">${esc(g)}</button>`).join('')}</div>
+    </div>
     ${spark ? `<div class="detail__spark">${spark}</div>` : ''}
     <p class="section-label">${hist.length === 1 ? '1 sesión' : hist.length + ' sesiones'} · toca una para editar</p>
     ${sessions}
@@ -462,6 +477,8 @@ async function render() {
 async function saveSet() {
   const name = state.selectedExercise;
   const { peso, sets, rir, molestias, nota } = readForm();
+  const grupoEl = document.querySelector('#f-grupo .groupchip.is-active');
+  const grupo = grupoEl ? grupoEl.dataset.group : grupoDe(name);
 
   if (!name || isNaN(peso) || peso <= 0 || sets.every((s) => s === null)) {
     toast('Añade peso y al menos la serie 1');
@@ -473,7 +490,7 @@ async function saveSet() {
     fecha: todayISO(),
     timestamp: Date.now(),
     ejercicio: name,
-    grupo: grupoDe(name),
+    grupo,
     peso,
     sets,
     rir,
@@ -541,6 +558,12 @@ function handleClick(e) {
       break;
     }
 
+    case 'group-pick': {
+      document.querySelectorAll('#f-grupo .groupchip').forEach((c) => c.classList.remove('is-active'));
+      el.classList.add('is-active');
+      break;
+    }
+
     case 'save-set':
       saveSet();
       break;
@@ -573,6 +596,10 @@ function handleClick(e) {
 
     case 'rename-exercise':
       renameExercisePrompt(el.dataset.ex);
+      break;
+
+    case 'detail-group':
+      regroupExerciseNow(state.detail, el.dataset.group);
       break;
 
     case 'delete-exercise':
@@ -631,6 +658,19 @@ async function saveEdit(id) {
   } catch (err) {
     console.error(err);
     toast('Error al guardar');
+  }
+}
+
+async function regroupExerciseNow(name, grupo) {
+  if (!name || !grupo || grupoDe(name) === grupo) return;
+  try {
+    await DB.regroupExercise(name, grupo);
+    toast(`Movido a ${grupo} ✓`);
+    await ensureExerciseList();
+    await render();
+  } catch (err) {
+    console.error(err);
+    toast('Error al cambiar de grupo');
   }
 }
 

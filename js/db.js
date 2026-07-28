@@ -140,6 +140,15 @@ const DB = (() => {
     return { count: toUpdate.length, merged: !!target };
   }
 
+  // Cambia el grupo muscular de un ejercicio en todas sus series.
+  async function regroupExercise(name, grupo) {
+    const all = await getAll();
+    const toUpdate = all.filter((e) => e.ejercicio === name).map((e) => ({ ...e, grupo }));
+    if (!toUpdate.length) return 0;
+    await bulkPut(toUpdate);
+    return toUpdate.length;
+  }
+
   // Elimina un ejercicio y todas sus series.
   async function deleteExercise(name) {
     const all = await getAll();
@@ -159,7 +168,7 @@ const DB = (() => {
   return {
     put, getAll, get, remove,
     usedExercises, lastFor, historyFor,
-    renameExercise, deleteExercise,
+    renameExercise, deleteExercise, regroupExercise,
     exportJSON, exportCSV, importJSON,
   };
 })();
