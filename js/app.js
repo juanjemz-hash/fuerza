@@ -33,7 +33,9 @@ const state = {
   learnedGroups: {},     // ejercicio -> grupo, aprendido de los datos (importados o registrados)
   histGroup: null,       // filtro del historial por grupo muscular
   histExercise: null,    // filtro del historial por ejercicio (dentro del grupo)
+  histSearch: '',        // búsqueda de texto en el historial
   editId: null,          // id de la serie que se está editando
+  draft: null,           // formulario a medio rellenar, para no perderlo al cambiar de pestaña
 };
 
 /* ---------------------------- helpers ---------------------------- */
@@ -168,7 +170,7 @@ function setCellsHTML(valueFor, phFor) {
   return [0, 1, 2, 3, 4, 5].map((i) => `
     <div class="setcell">
       <span class="setcell__tag">S${i + 1}</span>
-      <input class="setcell__input num" id="f-s${i + 1}" type="number" inputmode="numeric" ${valueFor(i)} ${phFor(i)} aria-label="Serie ${i + 1}" />
+      <input class="setcell__input num" id="f-s${i + 1}" type="number" inputmode="numeric" maxlength="2" ${valueFor(i)} ${phFor(i)} aria-label="Serie ${i + 1}" />
     </div>`).join('');
 }
 
@@ -215,6 +217,7 @@ async function renderLog() {
   const hist = await DB.historyFor(name);
   const last = hist[0] || null;
   const prev = hist[1] || null;
+  const draft = (state.draft && state.draft.exercise === name) ? state.draft : null;
 
   let card;
   if (last) {
@@ -252,7 +255,7 @@ async function renderLog() {
     ${!state.usedSet.has(name) ? `
     <div class="field">
       <div class="field__label"><span>Grupo muscular</span><span class="field__note">ejercicio nuevo</span></div>
-      <div class="groupbar" id="f-grupo">${groupPickerHTML(grupoDe(name) !== 'Otros' ? grupoDe(name) : null)}</div>
+      <div class="groupbar" id="f-grupo">${groupPickerHTML(draft && draft.grupo ? draft.grupo : (grupoDe(name) !== 'Otros' ? grupoDe(name) : null))}</div>
     </div>` : ''}
 
     <div class="field">
@@ -260,38 +263,78 @@ async function renderLog() {
       <div class="weight">
         <button class="weight__step" data-action="weight-step" data-delta="-2.5" aria-label="Bajar 2,5 kg">−</button>
         <input class="weight__input num" id="f-peso" type="number" inputmode="decimal" step="2.5"
-          value="${last ? (+last.peso) : ''}" placeholder="0" aria-label="Peso en kg" />
+          value="${draft ? esc(draft.peso) : (last ? (+last.peso) : '')}" placeholder="0" aria-label="Peso en kg" />
         <button class="weight__step" data-action="weight-step" data-delta="2.5" aria-label="Subir 2,5 kg">+</button>
       </div>
     </div>
 
     <div class="field">
       <div class="field__label"><span>Series — repeticiones</span></div>
-      <div class="sets">${setCellsHTML(() => '', (i) => ph(i))}</div>
+      <div class="sets">${setCellsHTML(
+        (i) => (draft && draft.sets[i] !== '' && draft.sets[i] != null ? `value="${esc(draft.sets[i])}"` : ''),
+        (i) => ph(i)
+      )}</div>
     </div>
 
     <div class="field">
       <div class="field__label"><span>RIR</span><span class="field__note">objetivo 1–2</span></div>
-      <div class="rir" id="f-rir">${rirHTML(null)}</div>
+      <div class="rir" id="f-rir">${rirHTML(draft && draft.rir != null ? parseInt(draft.rir, 10) : null)}</div>
       <p class="rir__legend">0 fallo · 1–2 productivo · 3 ligero · 4+ demasiado ligero</p>
     </div>
 
     <div class="field">
       <div class="field__label"><span>Molestias</span><span class="field__note">opcional</span></div>
-      <textarea class="textfield" id="f-molestias" rows="1" placeholder="p. ej. antebrazo / codo"></textarea>
+      <textarea class="textfield" id="f-molestias" rows="1" placeholder="p. ej. antebrazo / codo">${draft ? esc(draft.molestias) : ''}</textarea>
     </div>
 
     <div class="field">
       <div class="field__label"><span>Nota</span><span class="field__note">opcional</span></div>
-      <textarea class="textfield" id="f-nota" rows="1" placeholder="técnica, tempo, sensaciones…"></textarea>
+      <textarea class="textfield" id="f-nota" rows="1" placeholder="técnica, tempo, sensaciones…">${draft ? esc(draft.nota) : ''}</textarea>
     </div>
 
     <button class="btn-primary" data-action="save-set">Guardar serie</button>
   `;
 }
 
+// Construye la lista del historial aplicando los filtros activos (grupo / ejercicio / búsqueda).
+function buildHistList(all) {
+  let entries = all;
+  if (state.histExercise) entries = entries.filter((e) => e.ejercicio === state.histExercise);
+  else if (state.histGroup) entries = entries.filter((e) => grupoDe(e.ejercicio) === state.histGroup);
+  const q = state.histSearch.trim().toLowerCase();
+  if (q) entries = entries.filter((e) => e.ejercicio.toLowerCase().includes(q));
+
+  if (!entries.length) {
+    return `<div class="empty"><div class="empty__icon">▤</div><p class="empty__text">No hay series con este filtro.</p></div>`;
+  }
+
+  const groups = [];
+  const idx = {};
+  for (const e of entries) {
+    if (!(e.fecha in idx)) { idx[e.fecha] = groups.length; groups.push({ fecha: e.fecha, items: [] }); }
+    groups[idx[e.fecha]].items.push(e);
+  }
+
+  return groups.map((g) => `
+    <section class="daygroup">
+      <h2 class="daygroup__head">${fmtDate(g.fecha, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
+      ${g.items.map((e) => `
+        <div class="entry" data-action="open-detail" data-ex="${esc(e.ejercicio)}">
+          <div class="entry__main">
+            <div class="entry__name">${esc(e.ejercicio)}</div>
+            <div class="entry__meta num"><b>${(+e.peso)} kg</b> · ${setsStr(e.sets) || '—'}</div>
+            ${e.molestias ? `<div class="entry__molestia">⚠ ${esc(e.molestias)}</div>` : ''}
+          </div>
+          ${e.rir !== null && e.rir !== undefined
+            ? `<span class="entry__rir num" style="color:${rirColorVar(e.rir)}">RIR ${e.rir === 4 ? '4+' : e.rir}</span>`
+            : ''}
+        </div>`).join('')}
+    </section>`).join('');
+}
+
 async function renderHistory() {
   const all = await DB.getAll();
+  state._histAll = all;
 
   const tools = `
     <div class="history__tools">
@@ -309,6 +352,9 @@ async function renderHistory() {
         <p class="empty__text">Aún no hay series.<br>Registra la primera en la pestaña <b>Registrar</b>.</p>
       </div>`;
   }
+
+  const search = `<input class="picker__search hist-search" type="text" inputmode="search"
+    placeholder="🔍  Buscar ejercicio…" value="${esc(state.histSearch)}" autocomplete="off" />`;
 
   // --- barra de grupos (solo los que tienen series) ---
   const gruposPresentes = new Set(all.map((e) => grupoDe(e.ejercicio)));
@@ -340,49 +386,12 @@ async function renderHistory() {
 
   const filters = groupBar + exBar;
 
-  // note de respaldo solo en la vista completa (sin filtros), para no estorbar en el uso diario
-  const note = (!state.histGroup && !state.histExercise)
+  // note de respaldo solo en la vista completa (sin filtros ni búsqueda)
+  const note = (!state.histGroup && !state.histExercise && !state.histSearch.trim())
     ? `<p class="backup-note"><b>Copiar</b> pega tus datos en el chat con tu coach o donde quieras. <b>Exportar</b> guarda un archivo de respaldo — hazlo de vez en cuando: los datos viven solo en este iPhone.</p>`
     : '';
 
-  // --- aplicar filtros ---
-  let entries = all;
-  if (state.histExercise) entries = entries.filter((e) => e.ejercicio === state.histExercise);
-  else if (state.histGroup) entries = entries.filter((e) => grupoDe(e.ejercicio) === state.histGroup);
-
-  if (!entries.length) {
-    return tools + filters + `
-      <div class="empty">
-        <div class="empty__icon">▤</div>
-        <p class="empty__text">No hay series con este filtro.</p>
-      </div>`;
-  }
-
-  // agrupar por fecha (desc, ya viene ordenado por timestamp)
-  const groups = [];
-  const idx = {};
-  for (const e of entries) {
-    if (!(e.fecha in idx)) { idx[e.fecha] = groups.length; groups.push({ fecha: e.fecha, items: [] }); }
-    groups[idx[e.fecha]].items.push(e);
-  }
-
-  const body = groups.map((g) => `
-    <section class="daygroup">
-      <h2 class="daygroup__head">${fmtDate(g.fecha, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
-      ${g.items.map((e) => `
-        <div class="entry" data-action="open-detail" data-ex="${esc(e.ejercicio)}">
-          <div class="entry__main">
-            <div class="entry__name">${esc(e.ejercicio)}</div>
-            <div class="entry__meta num"><b>${(+e.peso)} kg</b> · ${setsStr(e.sets) || '—'}</div>
-            ${e.molestias ? `<div class="entry__molestia">⚠ ${esc(e.molestias)}</div>` : ''}
-          </div>
-          ${e.rir !== null && e.rir !== undefined
-            ? `<span class="entry__rir num" style="color:${rirColorVar(e.rir)}">RIR ${e.rir === 4 ? '4+' : e.rir}</span>`
-            : ''}
-        </div>`).join('')}
-    </section>`).join('');
-
-  return tools + filters + note + body;
+  return tools + search + filters + note + `<div id="hist-list">${buildHistList(all)}</div>`;
 }
 
 async function renderDetail(name) {
@@ -501,6 +510,7 @@ async function saveSet() {
   try {
     await DB.put(entry);
     toast('Serie guardada ✓');
+    state.draft = null;
     state.selectedExercise = null;
     await ensureExerciseList();
     await render();
@@ -517,6 +527,7 @@ function handleClick(e) {
 
   switch (action) {
     case 'pick-exercise':
+      state.draft = null;
       state.selectedExercise = el.dataset.ex;
       render();
       break;
@@ -524,21 +535,23 @@ function handleClick(e) {
     case 'add-exercise': {
       const input = document.querySelector('.picker__search');
       const val = (input && input.value.trim()) || '';
-      if (val) { state.selectedExercise = val; render(); }
+      if (val) { state.draft = null; state.selectedExercise = val; render(); }
       break;
     }
 
     case 'pick-group': {
-      state.selectedGroup = el.dataset.group || null;
-      document.querySelectorAll('.groupchip').forEach((c) => c.classList.remove('is-active'));
-      el.classList.add('is-active');
+      const g = el.dataset.group || null;
+      state.selectedGroup = (state.selectedGroup === g) ? null : g; // volver a pulsar = quitar
       const input = document.querySelector('.picker__search');
+      const gb = document.querySelector('.groupbar');
       const chips = document.querySelector('.chips');
+      if (gb) gb.innerHTML = buildGroupBar(state.selectedGroup);
       if (chips) chips.innerHTML = buildChips(input ? input.value : '', state.selectedGroup);
       break;
     }
 
     case 'back-to-picker':
+      state.draft = null;
       state.selectedExercise = null;
       render();
       break;
@@ -568,16 +581,20 @@ function handleClick(e) {
       saveSet();
       break;
 
-    case 'hist-group':
-      state.histGroup = el.dataset.group || null;
+    case 'hist-group': {
+      const g = el.dataset.group || null;
+      state.histGroup = (state.histGroup === g) ? null : g; // volver a pulsar = quitar
       state.histExercise = null;
       render();
       break;
+    }
 
-    case 'hist-exercise':
-      state.histExercise = el.dataset.ex || null;
+    case 'hist-exercise': {
+      const ex = el.dataset.ex || null;
+      state.histExercise = (state.histExercise === ex) ? null : ex;
       render();
       break;
+    }
 
     case 'open-detail':
       state.detail = el.dataset.ex;
@@ -735,10 +752,38 @@ async function exportCopy() {
   }
 }
 
+let autoAdvTimer;
+function focusNextSet(input) {
+  const m = input.id.match(/^f-s(\d)$/);
+  if (!m) return;
+  const next = document.getElementById('f-s' + (parseInt(m[1], 10) + 1));
+  if (next) next.focus();
+}
+// Auto-avanza a la siguiente serie: al instante con 2 cifras (10, 12…); con 1 cifra tras una breve pausa.
+function autoAdvance(input) {
+  clearTimeout(autoAdvTimer);
+  const len = input.value.length;
+  if (len >= 2) focusNextSet(input);
+  else if (len === 1) autoAdvTimer = setTimeout(() => {
+    if (document.activeElement === input) focusNextSet(input);
+  }, 800);
+}
+
 function handleInput(e) {
-  if (e.target.classList.contains('picker__search')) {
+  const t = e.target;
+  if (t.classList.contains('hist-search')) {
+    state.histSearch = t.value;
+    const list = document.getElementById('hist-list');
+    if (list && state._histAll) list.innerHTML = buildHistList(state._histAll);
+    return;
+  }
+  if (t.classList.contains('picker__search')) {
     const chips = document.querySelector('.chips');
-    if (chips) chips.innerHTML = buildChips(e.target.value, state.selectedGroup);
+    if (chips) chips.innerHTML = buildChips(t.value, state.selectedGroup);
+    return;
+  }
+  if (t.classList.contains('setcell__input')) {
+    autoAdvance(t);
   }
 }
 
@@ -758,9 +803,28 @@ async function handleImportFile(e) {
   }
 }
 
+// Guarda el formulario a medio rellenar para que no se pierda al cambiar de pestaña.
+function captureDraft() {
+  const pesoEl = document.getElementById('f-peso');
+  if (!(state.tab === 'log' && state.selectedExercise && pesoEl)) return;
+  const rirEl = document.querySelector('#f-rir .rir__opt.is-active');
+  const grupoEl = document.querySelector('#f-grupo .groupchip.is-active');
+  state.draft = {
+    exercise: state.selectedExercise,
+    peso: pesoEl.value,
+    sets: [1, 2, 3, 4, 5, 6].map((i) => { const el = document.getElementById('f-s' + i); return el ? el.value : ''; }),
+    rir: rirEl ? rirEl.dataset.rir : null,
+    molestias: document.getElementById('f-molestias').value,
+    nota: document.getElementById('f-nota').value,
+    grupo: grupoEl ? grupoEl.dataset.group : null,
+  };
+}
+
 function switchTab(tab) {
+  if (tab !== state.tab) captureDraft(); // conserva lo que estabas rellenando
   state.tab = tab;
   state.detail = null;
+  state.editId = null;
   document.querySelectorAll('.tabbar__btn').forEach((b) =>
     b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'));
   render();

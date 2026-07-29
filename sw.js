@@ -1,6 +1,6 @@
 /* Service worker — cachea el shell para funcionar sin conexión.
    Sube el número de versión cuando cambies archivos para forzar update. */
-const CACHE = 'fuerza-v8';
+const CACHE = 'fuerza-v9';
 const ASSETS = [
   './',
   './index.html',
