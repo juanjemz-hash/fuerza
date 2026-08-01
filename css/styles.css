@@ -354,3 +354,5 @@ body {
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+.version-tag { text-align: center; color: var(--muted); opacity: 0.5; font-size: 11px; margin-top: 26px; }

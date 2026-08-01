@@ -2,6 +2,9 @@
  *  app.js — UI y lógica de Fuerza
  * ------------------------------------------------------------------ */
 
+// Versión visible de la app (sube junto con la caché del service worker).
+const APP_VERSION = 'v11';
+
 // Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
 // cualquier ejercicio que registres pasa a mostrarse por uso reciente.
 // Para cambiar los grupos, edita solo esta lista.
@@ -243,18 +246,22 @@ async function renderLog() {
         ${delta}
       </div>`;
   } else {
-    card = `<div class="lastcard lastcard--empty">Primera vez que registras <b>${esc(name)}</b>. Marca hoy la referencia.</div>`;
+    card = `<div class="lastcard lastcard--empty">Primera vez con este ejercicio. Marca hoy la referencia.</div>`;
   }
 
   const ph = (i) => (last && last.sets && last.sets[i] != null ? `placeholder="${last.sets[i]}"` : 'placeholder="–"');
 
   return `
     <button class="log__back" data-action="back-to-picker">‹ Cambiar ejercicio</button>
-    <h1 class="log__title">${esc(name)}</h1>
+    <h1 class="log__title">${state.usedSet.has(name) ? esc(name) : 'Nuevo ejercicio'}</h1>
     ${card}
     ${!state.usedSet.has(name) ? `
     <div class="field">
-      <div class="field__label"><span>Grupo muscular</span><span class="field__note">ejercicio nuevo</span></div>
+      <div class="field__label"><span>Nombre del ejercicio</span></div>
+      <input class="picker__search" id="f-nombre" type="text" value="${esc(draft && draft.nombre != null ? draft.nombre : name)}" placeholder="Nombre del ejercicio" autocomplete="off" />
+    </div>
+    <div class="field">
+      <div class="field__label"><span>Grupo muscular</span></div>
       <div class="groupbar" id="f-grupo">${groupPickerHTML(draft && draft.grupo ? draft.grupo : (grupoDe(name) !== 'Otros' ? grupoDe(name) : null))}</div>
     </div>` : ''}
 
@@ -391,7 +398,8 @@ async function renderHistory() {
     ? `<p class="backup-note"><b>Copiar</b> pega tus datos en el chat con tu coach o donde quieras. <b>Exportar</b> guarda un archivo de respaldo — hazlo de vez en cuando: los datos viven solo en este iPhone.</p>`
     : '';
 
-  return tools + search + filters + note + `<div id="hist-list">${buildHistList(all)}</div>`;
+  return tools + search + filters + note + `<div id="hist-list">${buildHistList(all)}</div>` +
+    `<p class="version-tag">Fuerza ${APP_VERSION}</p>`;
 }
 
 async function renderDetail(name) {
@@ -484,12 +492,14 @@ async function render() {
 /* --------------------------- interactions ------------------------ */
 
 async function saveSet() {
-  const name = state.selectedExercise;
+  const nombreEl = document.getElementById('f-nombre');
+  const name = nombreEl ? nombreEl.value.trim() : state.selectedExercise;
   const { peso, sets, rir, molestias, nota } = readForm();
   const grupoEl = document.querySelector('#f-grupo .groupchip.is-active');
   const grupo = grupoEl ? grupoEl.dataset.group : grupoDe(name);
 
-  if (!name || isNaN(peso) || peso <= 0 || sets.every((s) => s === null)) {
+  if (!name) { toast('Ponle nombre al ejercicio'); return; }
+  if (isNaN(peso) || peso <= 0 || sets.every((s) => s === null)) {
     toast('Añade peso y al menos la serie 1');
     return;
   }
@@ -597,6 +607,7 @@ function handleClick(e) {
     }
 
     case 'open-detail':
+      state.histSearch = ''; // al abrir el ejercicio buscado, se limpia la búsqueda
       state.detail = el.dataset.ex;
       render();
       break;
@@ -809,8 +820,10 @@ function captureDraft() {
   if (!(state.tab === 'log' && state.selectedExercise && pesoEl)) return;
   const rirEl = document.querySelector('#f-rir .rir__opt.is-active');
   const grupoEl = document.querySelector('#f-grupo .groupchip.is-active');
+  const nombreEl = document.getElementById('f-nombre');
   state.draft = {
     exercise: state.selectedExercise,
+    nombre: nombreEl ? nombreEl.value : null,
     peso: pesoEl.value,
     sets: [1, 2, 3, 4, 5, 6].map((i) => { const el = document.getElementById('f-s' + i); return el ? el.value : ''; }),
     rir: rirEl ? rirEl.dataset.rir : null,
@@ -825,6 +838,7 @@ function switchTab(tab) {
   state.tab = tab;
   state.detail = null;
   state.editId = null;
+  state.histSearch = ''; // la búsqueda del historial no persiste entre pantallas
   document.querySelectorAll('.tabbar__btn').forEach((b) =>
     b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'));
   render();

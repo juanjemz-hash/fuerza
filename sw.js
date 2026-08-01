@@ -1,6 +1,7 @@
-/* Service worker — cachea el shell para funcionar sin conexión.
-   Sube el número de versión cuando cambies archivos para forzar update. */
-const CACHE = 'fuerza-v9';
+/* Service worker — "red primero": si hay conexión, siempre sirve la última versión;
+   la caché es solo el respaldo para funcionar sin conexión (en el gym).
+   Así las actualizaciones entran solas al reabrir con conexión. */
+const CACHE = 'fuerza-v11';
 const ASSETS = [
   './',
   './index.html',
@@ -31,20 +32,16 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   if (request.method !== 'GET') return;
+  if (new URL(request.url).origin !== self.location.origin) return; // externos, sin tocar
 
+  // Red primero, con la caché como respaldo si no hay conexión.
   event.respondWith(
-    caches.match(request).then((cached) => {
-      if (cached) return cached;
-      return fetch(request)
-        .then((res) => {
-          // guarda en caché copias de recursos propios (mismo origen)
-          if (res.ok && new URL(request.url).origin === self.location.origin) {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(request, copy));
-          }
-          return res;
-        })
-        .catch(() => cached);
-    })
+    fetch(request)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(request, copy));
+        return res;
+      })
+      .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
   );
 });
