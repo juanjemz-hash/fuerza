@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------ */
 
 // Versión visible de la app (sube junto con la caché del service worker).
-const APP_VERSION = 'v11';
+const APP_VERSION = 'v12';
 
 // Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
 // cualquier ejercicio que registres pasa a mostrarse por uso reciente.
@@ -46,6 +46,11 @@ const state = {
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// Normaliza para buscar sin distinguir mayúsculas ni tildes ("jalon" encuentra "Jalón").
+function normalizar(s) {
+  return String(s ?? '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
 function todayISO(d = new Date()) {
@@ -123,6 +128,17 @@ function download(filename, text, type) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+function daysSinceBackup() {
+  try {
+    const d = localStorage.getItem('fuerza_last_backup');
+    if (!d) return Infinity;
+    return Math.floor((new Date(todayISO() + 'T00:00:00') - new Date(d + 'T00:00:00')) / 86400000);
+  } catch (e) { return Infinity; }
+}
+function markBackup() {
+  try { localStorage.setItem('fuerza_last_backup', todayISO()); } catch (e) { /* sin localStorage */ }
+}
+
 async function ensureExerciseList() {
   const all = await DB.getAll(); // desc por timestamp
   const used = [];
@@ -151,17 +167,17 @@ function buildGroupBar(active) {
 }
 
 function buildChips(query, group) {
-  const q = (query || '').trim().toLowerCase();
+  const q = normalizar((query || '').trim());
   let list = state.exerciseList;
   if (group) list = list.filter((n) => grupoDe(n) === group);
-  if (q) list = list.filter((n) => n.toLowerCase().includes(q));
+  if (q) list = list.filter((n) => normalizar(n).includes(q));
 
   let html = list.slice(0, 60).map((n) =>
     `<button class="chip" data-action="pick-exercise" data-ex="${esc(n)}">${esc(n)}` +
     (state.usedSet.has(n) ? '<span class="chip__recent">✓</span>' : '') +
     `</button>`).join('');
 
-  const exact = state.exerciseList.some((n) => n.toLowerCase() === q);
+  const exact = state.exerciseList.some((n) => normalizar(n) === q);
   if (q && !exact) {
     html += `<button class="chip chip--add" data-action="add-exercise">+ Añadir "${esc(query.trim())}"</button>`;
   }
@@ -308,8 +324,8 @@ function buildHistList(all) {
   let entries = all;
   if (state.histExercise) entries = entries.filter((e) => e.ejercicio === state.histExercise);
   else if (state.histGroup) entries = entries.filter((e) => grupoDe(e.ejercicio) === state.histGroup);
-  const q = state.histSearch.trim().toLowerCase();
-  if (q) entries = entries.filter((e) => e.ejercicio.toLowerCase().includes(q));
+  const q = normalizar(state.histSearch.trim());
+  if (q) entries = entries.filter((e) => normalizar(e.ejercicio).includes(q));
 
   if (!entries.length) {
     return `<div class="empty"><div class="empty__icon">▤</div><p class="empty__text">No hay series con este filtro.</p></div>`;
@@ -393,12 +409,16 @@ async function renderHistory() {
 
   const filters = groupBar + exBar;
 
-  // note de respaldo solo en la vista completa (sin filtros ni búsqueda)
-  const note = (!state.histGroup && !state.histExercise && !state.histSearch.trim())
-    ? `<p class="backup-note"><b>Copiar</b> pega tus datos en el chat con tu coach o donde quieras. <b>Exportar</b> guarda un archivo de respaldo — hazlo de vez en cuando: los datos viven solo en este iPhone.</p>`
+  const dsb = daysSinceBackup();
+  const noFilter = (!state.histGroup && !state.histExercise && !state.histSearch.trim());
+  const backupWarn = dsb >= 7
+    ? `<div class="backup-warn">⚠️ ${dsb === Infinity ? 'Aún no has hecho una copia de seguridad' : 'Hace ' + dsb + ' días de tu última copia'}. Pulsa <b>Exportar</b> y guarda el archivo en <b>Archivos → iCloud Drive</b> para no perder nada.</div>`
+    : '';
+  const note = (noFilter && dsb < 7)
+    ? `<p class="backup-note"><b>Copiar</b> pega tus datos en el chat con tu coach o donde quieras. <b>Exportar</b> guarda un archivo de respaldo — hazlo cada semana: los datos viven solo en este iPhone.</p>`
     : '';
 
-  return tools + search + filters + note + `<div id="hist-list">${buildHistList(all)}</div>` +
+  return backupWarn + tools + search + filters + note + `<div id="hist-list">${buildHistList(all)}</div>` +
     `<p class="version-tag">Fuerza ${APP_VERSION}</p>`;
 }
 
@@ -440,8 +460,18 @@ async function renderEdit(id) {
 
   return `
     <button class="log__back" data-action="cancel-edit">‹ Cancelar</button>
-    <h1 class="log__title">Editar · ${esc(entry.ejercicio)}</h1>
+    <h1 class="log__title">Editar serie</h1>
     <p class="section-label">${fmtDate(entry.fecha)}</p>
+
+    <div class="field">
+      <div class="field__label"><span>Ejercicio</span><span class="field__note">solo esta serie</span></div>
+      <input class="picker__search" id="f-nombre" type="text" value="${esc(entry.ejercicio)}" placeholder="Nombre del ejercicio" autocomplete="off" />
+    </div>
+
+    <div class="field">
+      <div class="field__label"><span>Grupo muscular</span></div>
+      <div class="groupbar" id="f-grupo">${groupPickerHTML(entry.grupo || grupoDe(entry.ejercicio))}</div>
+    </div>
 
     <div class="field">
       <div class="field__label"><span>Peso</span></div>
@@ -652,11 +682,11 @@ function handleClick(e) {
       break;
 
     case 'export-json':
-      DB.exportJSON().then((t) => { download(`fuerza-${todayISO()}.json`, t, 'application/json'); toast('Respaldo descargado ✓'); });
+      DB.exportJSON().then((t) => { download(`fuerza-${todayISO()}.json`, t, 'application/json'); markBackup(); toast('Respaldo descargado ✓'); render(); });
       break;
 
     case 'export-csv':
-      DB.exportCSV().then((t) => { download(`fuerza-${todayISO()}.csv`, t, 'text/csv'); toast('CSV descargado ✓'); });
+      DB.exportCSV().then((t) => { download(`fuerza-${todayISO()}.csv`, t, 'text/csv'); markBackup(); toast('CSV descargado ✓'); render(); });
       break;
 
     case 'import-open':
@@ -669,19 +699,25 @@ async function saveEdit(id) {
   const entry = await DB.get(id);
   if (!entry) { state.editId = null; return render(); }
   const { peso, sets, rir, molestias, nota } = readForm();
+  const nombreEl = document.getElementById('f-nombre');
+  const grupoEl = document.querySelector('#f-grupo .groupchip.is-active');
+  const ejercicio = nombreEl ? nombreEl.value.trim() : entry.ejercicio;
+  const grupo = grupoEl ? grupoEl.dataset.group : entry.grupo;
 
+  if (!ejercicio) { toast('Ponle nombre al ejercicio'); return; }
   if (isNaN(peso) || peso <= 0 || sets.every((s) => s === null)) {
     toast('Añade peso y al menos la serie 1');
     return;
   }
 
-  // se conservan id, fecha, timestamp, ejercicio y grupo; solo cambian los valores
-  const updated = { ...entry, peso, sets, rir, molestias, nota };
+  // se conservan id, fecha y timestamp; cambia el nombre/grupo SOLO de esta serie y sus valores
+  const updated = { ...entry, ejercicio, grupo, peso, sets, rir, molestias, nota };
 
   try {
     await DB.put(updated);
     toast('Cambios guardados ✓');
     state.editId = null;
+    await ensureExerciseList();
     await render();
   } catch (err) {
     console.error(err);
@@ -754,7 +790,9 @@ async function exportCopy() {
   try {
     const text = await DB.exportJSON();
     await navigator.clipboard.writeText(text);
+    markBackup();
     toast('JSON copiado ✓');
+    render();
   } catch (err) {
     console.error(err);
     // fallback si el portapapeles no está disponible

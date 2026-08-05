@@ -1,7 +1,7 @@
 /* Service worker — "red primero": si hay conexión, siempre sirve la última versión;
    la caché es solo el respaldo para funcionar sin conexión (en el gym).
    Así las actualizaciones entran solas al reabrir con conexión. */
-const CACHE = 'fuerza-v11';
+const CACHE = 'fuerza-v12';
 const ASSETS = [
   './',
   './index.html',

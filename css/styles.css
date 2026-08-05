@@ -263,6 +263,11 @@ body {
   background: var(--gold-soft); border-radius: var(--r-sm);
   padding: 10px 12px; margin-bottom: 20px;
 }
+.backup-warn {
+  font-size: 13px; color: var(--paper); line-height: 1.5;
+  background: var(--gold-soft); border: 1px solid var(--gold); border-radius: var(--r-sm);
+  padding: 12px 14px; margin-bottom: 16px;
+}
 
 .daygroup { margin-bottom: 22px; }
 .daygroup__head {
