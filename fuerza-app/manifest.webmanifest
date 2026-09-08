@@ -1,0 +1,18 @@
+{
+  "name": "Fuerza — Registro de entrenamiento",
+  "short_name": "Fuerza",
+  "description": "Tu registro de fuerza e hipertrofia, local-first y sin conexión.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#16130E",
+  "theme_color": "#16130E",
+  "lang": "es",
+  "dir": "ltr",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "./icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
