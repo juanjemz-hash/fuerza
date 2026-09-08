@@ -108,6 +108,15 @@ body {
 .groupbar--sub .groupchip { font-size: 12px; padding: 6px 12px; }
 
 .chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.chips__label {
+  flex: 0 0 100%; margin: 6px 0 2px;
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--muted); font-weight: 700;
+}
+.chips__label:first-child { margin-top: 0; }
+.btn-ghost--primary { border-color: var(--gold); color: var(--gold); }
+.lastcard--tap { cursor: pointer; }
+.lastcard--tap:active { background: var(--ink-3); }
 .chip {
   background: var(--ink-2);
   border: 1px solid var(--line);
@@ -249,7 +258,8 @@ body {
 .btn-primary:disabled { background: var(--ink-3); color: var(--muted); cursor: not-allowed; }
 
 /* ---------- History ---------- */
-.history__tools { display: flex; gap: 8px; margin-bottom: 18px; }
+.history__tools { display: flex; gap: 8px; margin-bottom: 8px; }
+.history__tools:last-of-type { margin-bottom: 18px; }
 .btn-ghost {
   flex: 1;
   background: var(--ink-2); border: 1px solid var(--line);

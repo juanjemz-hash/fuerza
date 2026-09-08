@@ -95,9 +95,28 @@ const DB = (() => {
 
   /* ---------- export / import ---------- */
 
-  async function exportJSON() {
-    const all = await getAll();
-    return JSON.stringify(all, null, 2);
+  // days = número de días hacia atrás (null/0 = todo el histórico).
+  // Formato compacto: una serie por línea y sin campos vacíos → archivo mucho
+  // más pequeño para pegar en un chat, pero sigue siendo JSON válido e importable.
+  async function exportJSON(days) {
+    let all = await getAll();
+    if (days) {
+      const limite = Date.now() - days * 86400000;
+      all = all.filter((e) => e.timestamp >= limite);
+    }
+    const lineas = all.map((e) => {
+      const o = { id: e.id, fecha: e.fecha, timestamp: e.timestamp, ejercicio: e.ejercicio };
+      if (e.grupo) o.grupo = e.grupo;
+      o.peso = e.peso;
+      const sets = (e.sets || []).slice();
+      while (sets.length && (sets[sets.length - 1] === null || sets[sets.length - 1] === undefined)) sets.pop();
+      o.sets = sets;
+      if (e.rir !== null && e.rir !== undefined) o.rir = e.rir;
+      if (e.molestias) o.molestias = e.molestias;
+      if (e.nota) o.nota = e.nota;
+      return '  ' + JSON.stringify(o);
+    });
+    return '[\n' + lineas.join(',\n') + '\n]';
   }
 
   async function exportCSV() {

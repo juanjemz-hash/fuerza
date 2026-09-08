@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------ */
 
 // Versión visible de la app (sube junto con la caché del service worker).
-const APP_VERSION = 'v12';
+const APP_VERSION = 'v14';
 
 // Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
 // cualquier ejercicio que registres pasa a mostrarse por uso reciente.
@@ -34,10 +34,13 @@ const state = {
   exerciseList: [],
   usedSet: new Set(),
   learnedGroups: {},     // ejercicio -> grupo, aprendido de los datos (importados o registrados)
+  usoCount: {},          // ejercicio -> nº de series registradas (para ordenar por uso)
   histGroup: null,       // filtro del historial por grupo muscular
   histExercise: null,    // filtro del historial por ejercicio (dentro del grupo)
   histSearch: '',        // búsqueda de texto en el historial
   editId: null,          // id de la serie que se está editando
+  renameFor: null,       // ejercicio que se está renombrando/fusionando
+  renameQuery: '',       // texto escrito en la pantalla de renombrar
   draft: null,           // formulario a medio rellenar, para no perderlo al cambiar de pestaña
 };
 
@@ -144,15 +147,18 @@ async function ensureExerciseList() {
   const used = [];
   const usedSet = new Set();
   const learned = {};
+  const uso = {};
   for (const e of all) {
     if (!usedSet.has(e.ejercicio)) { usedSet.add(e.ejercicio); used.push(e.ejercicio); }
     if (e.grupo && !(e.ejercicio in learned)) learned[e.ejercicio] = e.grupo;
+    uso[e.ejercicio] = (uso[e.ejercicio] || 0) + 1;
   }
   const list = [...used];
   list.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
   state.exerciseList = list;
   state.usedSet = usedSet;
   state.learnedGroups = learned;
+  state.usoCount = uso;
 }
 
 /* ------------------------------ views ---------------------------- */
@@ -172,10 +178,26 @@ function buildChips(query, group) {
   if (group) list = list.filter((n) => grupoDe(n) === group);
   if (q) list = list.filter((n) => normalizar(n).includes(q));
 
-  let html = list.slice(0, 60).map((n) =>
+  const uso = (n) => state.usoCount[n] || 0;
+  const chip = (n) =>
     `<button class="chip" data-action="pick-exercise" data-ex="${esc(n)}">${esc(n)}` +
     (state.usedSet.has(n) ? '<span class="chip__recent">✓</span>' : '') +
-    `</button>`).join('');
+    `</button>`;
+
+  let html = '';
+  if (q) {
+    // buscando: primero los que más usas
+    html = [...list].sort((a, b) => uso(b) - uso(a)).slice(0, 60).map(chip).join('');
+  } else {
+    const top = [...list].sort((a, b) => uso(b) - uso(a)).filter((n) => uso(n) > 0).slice(0, 6);
+    const rest = list.filter((n) => !top.includes(n));
+    if (top.length) {
+      html += `<p class="chips__label">Más usados</p>` + top.map(chip).join('');
+      if (rest.length) html += `<p class="chips__label">Todos</p>` + rest.map(chip).join('');
+    } else {
+      html = list.slice(0, 60).map(chip).join('');
+    }
+  }
 
   const exact = state.exerciseList.some((n) => normalizar(n) === q);
   if (q && !exact) {
@@ -227,7 +249,7 @@ async function renderLog() {
       <p class="section-label">Registrar serie</p>
       <input class="picker__search" type="text" inputmode="search"
         placeholder="Buscar o añadir ejercicio…" autocomplete="off" />
-      <div class="groupbar">${buildGroupBar(state.selectedGroup)}</div>
+      <div class="groupbar" id="pick-groupbar">${buildGroupBar(state.selectedGroup)}</div>
       <div class="chips">${buildChips('', state.selectedGroup)}</div>
     `;
   }
@@ -247,10 +269,10 @@ async function renderLog() {
       delta = `<div class="lastcard__delta">${up ? '▲' : '▼'} <b style="color:${up ? 'var(--good)' : 'var(--danger)'}">${up ? '+' : ''}${(+d.toFixed(2))} kg</b> desde la sesión anterior</div>`;
     }
     card = `
-      <div class="lastcard">
+      <div class="lastcard lastcard--tap" data-action="open-last" data-ex="${esc(name)}">
         <div class="lastcard__top">
           <span class="lastcard__label">Última vez</span>
-          <span class="lastcard__date">${fmtDate(last.fecha)} · ${daysAgo(last.fecha)}</span>
+          <span class="lastcard__date">${fmtDate(last.fecha)} · ${daysAgo(last.fecha)} ›</span>
         </div>
         <div class="lastcard__row">
           <span class="lastcard__peso num">${(+last.peso)}<small>kg</small></span>
@@ -355,13 +377,45 @@ function buildHistList(all) {
     </section>`).join('');
 }
 
+// Barra de grupos del historial (solo grupos con series).
+function buildHistGroupBar(all) {
+  const presentes = new Set(all.map((e) => grupoDe(e.ejercicio)));
+  const ordered = [...GRUPO_NOMBRES.filter((g) => presentes.has(g)),
+    ...(presentes.has('Otros') ? ['Otros'] : [])];
+  const gchip = (label, val, active) =>
+    `<button class="groupchip${active ? ' is-active' : ''}" data-action="hist-group" data-group="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
+  return gchip('Todos', null, !state.histGroup) +
+    ordered.map((g) => gchip(g, g, state.histGroup === g)).join('');
+}
+
+// Sub-barra de ejercicios del grupo elegido (vacía si no hay grupo activo).
+function buildHistExBar(all) {
+  if (!state.histGroup) return '';
+  const exs = [];
+  const seen = new Set();
+  for (const e of all) {
+    if (grupoDe(e.ejercicio) === state.histGroup && !seen.has(e.ejercicio)) {
+      seen.add(e.ejercicio); exs.push(e.ejercicio);
+    }
+  }
+  exs.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
+  const echip = (label, val, active) =>
+    `<button class="groupchip${active ? ' is-active' : ''}" data-action="hist-exercise" data-ex="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
+  return `<div class="groupbar groupbar--sub">` +
+    echip('Todos', null, !state.histExercise) +
+    exs.map((n) => echip(n, n, state.histExercise === n)).join('') + `</div>`;
+}
+
 async function renderHistory() {
   const all = await DB.getAll();
   state._histAll = all;
 
   const tools = `
     <div class="history__tools">
-      <button class="btn-ghost" data-action="export-copy">Copiar</button>
+      <button class="btn-ghost btn-ghost--primary" data-action="export-copy" data-days="15">Copiar 15 días</button>
+      <button class="btn-ghost" data-action="export-copy" data-days="">Copiar todo</button>
+    </div>
+    <div class="history__tools">
       <button class="btn-ghost" data-action="export-json">Exportar</button>
       <button class="btn-ghost" data-action="export-csv">CSV</button>
       <button class="btn-ghost" data-action="import-open">Importar</button>
@@ -379,33 +433,8 @@ async function renderHistory() {
   const search = `<input class="picker__search hist-search" type="text" inputmode="search"
     placeholder="🔍  Buscar ejercicio…" value="${esc(state.histSearch)}" autocomplete="off" />`;
 
-  // --- barra de grupos (solo los que tienen series) ---
-  const gruposPresentes = new Set(all.map((e) => grupoDe(e.ejercicio)));
-  const ordered = [...GRUPO_NOMBRES.filter((g) => gruposPresentes.has(g)),
-    ...(gruposPresentes.has('Otros') ? ['Otros'] : [])];
-  const gchip = (label, val, active) =>
-    `<button class="groupchip${active ? ' is-active' : ''}" data-action="hist-group" data-group="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
-  const groupBar = `<div class="groupbar">` +
-    gchip('Todos', null, !state.histGroup) +
-    ordered.map((g) => gchip(g, g, state.histGroup === g)).join('') + `</div>`;
-
-  // --- barra de ejercicios del grupo elegido ---
-  let exBar = '';
-  if (state.histGroup) {
-    const exs = [];
-    const seen = new Set();
-    for (const e of all) {
-      if (grupoDe(e.ejercicio) === state.histGroup && !seen.has(e.ejercicio)) {
-        seen.add(e.ejercicio); exs.push(e.ejercicio);
-      }
-    }
-    exs.sort((a, b) => a.localeCompare(b, 'es', { sensitivity: 'base' }));
-    const echip = (label, val, active) =>
-      `<button class="groupchip${active ? ' is-active' : ''}" data-action="hist-exercise" data-ex="${val === null ? '' : esc(val)}">${esc(label)}</button>`;
-    exBar = `<div class="groupbar groupbar--sub">` +
-      echip('Todos', null, !state.histExercise) +
-      exs.map((n) => echip(n, n, state.histExercise === n)).join('') + `</div>`;
-  }
+  const groupBar = `<div class="groupbar" id="hist-groupbar">${buildHistGroupBar(all)}</div>`;
+  const exBar = `<div id="hist-exbar">${buildHistExBar(all)}</div>`;
 
   const filters = groupBar + exBar;
 
@@ -415,7 +444,7 @@ async function renderHistory() {
     ? `<div class="backup-warn">⚠️ ${dsb === Infinity ? 'Aún no has hecho una copia de seguridad' : 'Hace ' + dsb + ' días de tu última copia'}. Pulsa <b>Exportar</b> y guarda el archivo en <b>Archivos → iCloud Drive</b> para no perder nada.</div>`
     : '';
   const note = (noFilter && dsb < 7)
-    ? `<p class="backup-note"><b>Copiar</b> pega tus datos en el chat con tu coach o donde quieras. <b>Exportar</b> guarda un archivo de respaldo — hazlo cada semana: los datos viven solo en este iPhone.</p>`
+    ? `<p class="backup-note"><b>Copiar 15 días</b> es lo que pegas en un chat para que te analicen la última semana. <b>Exportar</b> guarda el respaldo completo — hazlo cada semana y guárdalo en iCloud Drive: los datos viven solo en este iPhone.</p>`
     : '';
 
   return backupWarn + tools + search + filters + note + `<div id="hist-list">${buildHistList(all)}</div>` +
@@ -516,6 +545,7 @@ async function render() {
   const view = document.getElementById('view');
   if (state.tab === 'log') view.innerHTML = await renderLog();
   else if (state.editId) view.innerHTML = await renderEdit(state.editId);
+  else if (state.renameFor) view.innerHTML = renderRename();
   else view.innerHTML = state.detail ? await renderDetail(state.detail) : await renderHistory();
 }
 
@@ -550,7 +580,7 @@ async function saveSet() {
   try {
     await DB.put(entry);
     toast('Serie guardada ✓');
-    state.draft = null;
+    clearDraft();
     state.selectedExercise = null;
     await ensureExerciseList();
     await render();
@@ -567,7 +597,7 @@ function handleClick(e) {
 
   switch (action) {
     case 'pick-exercise':
-      state.draft = null;
+      clearDraft();
       state.selectedExercise = el.dataset.ex;
       render();
       break;
@@ -575,7 +605,7 @@ function handleClick(e) {
     case 'add-exercise': {
       const input = document.querySelector('.picker__search');
       const val = (input && input.value.trim()) || '';
-      if (val) { state.draft = null; state.selectedExercise = val; render(); }
+      if (val) { clearDraft(); state.selectedExercise = val; render(); }
       break;
     }
 
@@ -591,7 +621,7 @@ function handleClick(e) {
     }
 
     case 'back-to-picker':
-      state.draft = null;
+      clearDraft();
       state.selectedExercise = null;
       render();
       break;
@@ -601,6 +631,7 @@ function handleClick(e) {
       const cur = parseFloat(input.value) || 0;
       const next = Math.max(0, cur + parseFloat(el.dataset.delta));
       input.value = Number.isInteger(next) ? next : +next.toFixed(2);
+      captureDraft();
       break;
     }
 
@@ -608,14 +639,20 @@ function handleClick(e) {
       const wasActive = el.classList.contains('is-active');
       document.querySelectorAll('#f-rir .rir__opt').forEach((o) => o.classList.remove('is-active'));
       if (!wasActive) el.classList.add('is-active'); // segundo toque = deseleccionar
+      captureDraft();
       break;
     }
 
     case 'group-pick': {
       document.querySelectorAll('#f-grupo .groupchip').forEach((c) => c.classList.remove('is-active'));
       el.classList.add('is-active');
+      captureDraft();
       break;
     }
+
+    case 'open-last':
+      goToDetail(el.dataset.ex);
+      break;
 
     case 'save-set':
       saveSet();
@@ -644,6 +681,7 @@ function handleClick(e) {
 
     case 'close-detail':
       state.detail = null;
+      state.renameFor = null;
       render();
       break;
 
@@ -653,7 +691,22 @@ function handleClick(e) {
       break;
 
     case 'rename-exercise':
-      renameExercisePrompt(el.dataset.ex);
+      openRename(el.dataset.ex);
+      break;
+
+    case 'rename-cancel':
+      state.renameFor = null;
+      render();
+      break;
+
+    case 'rename-save': {
+      const input = document.getElementById('f-rename');
+      aplicarRename(input ? input.value.trim() : '');
+      break;
+    }
+
+    case 'rename-pick':
+      aplicarRename(el.dataset.ex);
       break;
 
     case 'detail-group':
@@ -678,15 +731,15 @@ function handleClick(e) {
       break;
 
     case 'export-copy':
-      exportCopy();
+      exportCopy(el.dataset.days ? parseInt(el.dataset.days, 10) : null);
       break;
 
     case 'export-json':
-      DB.exportJSON().then((t) => { download(`fuerza-${todayISO()}.json`, t, 'application/json'); markBackup(); toast('Respaldo descargado ✓'); render(); });
+      DB.exportJSON().then((t) => guardarArchivo(`fuerza-${todayISO()}.json`, t, 'application/json'));
       break;
 
     case 'export-csv':
-      DB.exportCSV().then((t) => { download(`fuerza-${todayISO()}.csv`, t, 'text/csv'); markBackup(); toast('CSV descargado ✓'); render(); });
+      DB.exportCSV().then((t) => guardarArchivo(`fuerza-${todayISO()}.csv`, t, 'text/csv'));
       break;
 
     case 'import-open':
@@ -738,16 +791,94 @@ async function regroupExerciseNow(name, grupo) {
   }
 }
 
-async function renameExercisePrompt(name) {
-  const nuevo = window.prompt('Nuevo nombre del ejercicio (si coincide con otro, se fusionan):', name);
-  if (nuevo === null) return;
-  const trimmed = nuevo.trim();
-  if (!trimmed || trimmed === name) return;
+/* ---------- renombrar / fusionar ejercicios ---------- */
+
+// Parecido entre dos nombres: palabras en común + bonus si son del mismo grupo.
+function parecido(a, b, grupoA, grupoB) {
+  const tok = (s) => new Set(normalizar(s).split(/[^a-z0-9]+/).filter((w) => w.length > 2));
+  const ta = tok(a); const tb = tok(b);
+  let comunes = 0;
+  ta.forEach((w) => { if (tb.has(w)) comunes++; });
+  const total = new Set([...ta, ...tb]).size || 1;
+  return comunes / total + (grupoA && grupoA === grupoB ? 0.15 : 0);
+}
+
+async function openRename(nombre) {
+  const all = await DB.getAll();
+  const uso = {}; const grupos = {};
+  for (const e of all) {
+    uso[e.ejercicio] = (uso[e.ejercicio] || 0) + 1;
+    if (!(e.ejercicio in grupos)) grupos[e.ejercicio] = e.grupo || grupoDe(e.ejercicio);
+  }
+  const gActual = grupos[nombre] || grupoDe(nombre);
+  const otros = Object.keys(uso).filter((n) => n !== nombre)
+    .sort((a, b) => parecido(nombre, b, gActual, grupos[b]) - parecido(nombre, a, gActual, grupos[a]));
+  state._renameData = { uso, grupos, otros };
+  state.renameFor = nombre;
+  state.renameQuery = nombre;
+  render();
+}
+
+function buildRenameList() {
+  const d = state._renameData;
+  if (!d) return '';
+  // si aún no has tocado el nombre, muestra los más parecidos
+  const escrito = state.renameQuery.trim();
+  const q = (escrito === state.renameFor) ? '' : normalizar(escrito);
+  let list = d.otros;
+  if (q) list = list.filter((n) => normalizar(n).includes(q));
+  else list = list.slice(0, 12);
+
+  if (!list.length) {
+    return '<p class="picker__hint">Ningún ejercicio existente coincide. Pulsa «Guardar nombre» para renombrarlo sin fusionar.</p>';
+  }
+  return list.map((n) => `
+    <div class="entry" data-action="rename-pick" data-ex="${esc(n)}">
+      <div class="entry__main">
+        <div class="entry__name">${esc(n)}</div>
+        <div class="entry__meta">${esc(d.grupos[n] || 'Otros')} · ${d.uso[n]} ${d.uso[n] === 1 ? 'serie' : 'series'}</div>
+      </div>
+      <span class="entry__rir" style="color:var(--gold)">Fusionar</span>
+    </div>`).join('');
+}
+
+function renderRename() {
+  const d = state._renameData || { uso: {} };
+  const actual = state.renameFor;
+  const n = d.uso[actual] || 0;
+  return `
+    <button class="log__back" data-action="rename-cancel">‹ Cancelar</button>
+    <h1 class="log__title">Renombrar</h1>
+    <p class="section-label">${esc(actual)} · ${n} ${n === 1 ? 'serie' : 'series'}</p>
+
+    <div class="field">
+      <div class="field__label"><span>Nombre nuevo</span></div>
+      <input class="picker__search" id="f-rename" type="text" value="${esc(state.renameQuery)}" autocomplete="off" />
+      <button class="btn-primary" data-action="rename-save" style="margin-top:10px">Guardar nombre</button>
+    </div>
+
+    <p class="section-label">O fusionar con uno existente</p>
+    <p class="backup-note">Al fusionar, las ${n} series de <b>${esc(actual)}</b> pasan al ejercicio que elijas y los dos historiales se unen. Hazlo solo si es el mismo ejercicio.</p>
+    <div id="rename-list">${buildRenameList()}</div>
+  `;
+}
+
+async function aplicarRename(destino) {
+  const origen = state.renameFor;
+  const d = state._renameData || { uso: {}, otros: [] };
+  if (!destino || destino === origen) { toast('Escribe un nombre distinto'); return; }
+  const existe = d.otros.includes(destino);
+  const nOrigen = d.uso[origen] || 0;
+  if (existe) {
+    const nDest = d.uso[destino] || 0;
+    if (!window.confirm(`¿Fusionar "${origen}" (${nOrigen}) con "${destino}" (${nDest})?\n\nQuedará un solo ejercicio con ${nOrigen + nDest} series. No se puede deshacer.`)) return;
+  }
   try {
-    const { count, merged } = await DB.renameExercise(name, trimmed);
-    toast(merged ? `Fusionado en "${trimmed}" (${count} series) ✓` : `Renombrado (${count} series) ✓`);
-    state.detail = trimmed;      // seguir viendo el ejercicio, ya con su nuevo nombre
-    state.histExercise = null;   // el filtro por ejercicio del historial ya no aplica
+    const { count, merged } = await DB.renameExercise(origen, destino);
+    toast(merged ? `Fusionado en "${destino}" ✓` : `Renombrado (${count} series) ✓`);
+    state.renameFor = null;
+    state.detail = destino;
+    state.histExercise = null;
     await ensureExerciseList();
     await render();
   } catch (err) {
@@ -786,19 +917,42 @@ async function deleteEntry(id) {
   }
 }
 
-async function exportCopy() {
+async function exportCopy(days) {
   try {
-    const text = await DB.exportJSON();
+    const text = await DB.exportJSON(days);
+    const series = (text.match(/\n  \{/g) || []).length;
     await navigator.clipboard.writeText(text);
-    markBackup();
-    toast('JSON copiado ✓');
+    if (!days) markBackup(); // solo el volcado completo cuenta como respaldo
+    toast(days ? `${series} series (${days}d) copiadas ✓` : `${series} series copiadas ✓`);
     render();
   } catch (err) {
     console.error(err);
     // fallback si el portapapeles no está disponible
-    DB.exportJSON().then((t) => download(`fuerza-${todayISO()}.json`, t, 'application/json'));
+    DB.exportJSON(days).then((t) => download(`fuerza-${todayISO()}.json`, t, 'application/json'));
     toast('Copia no disponible — descargado');
   }
+}
+
+// En iPhone abre el menú de Compartir → "Guardar en Archivos" (iCloud Drive).
+// Si no está disponible, descarga el archivo normalmente.
+async function guardarArchivo(nombre, texto, tipo) {
+  try {
+    const file = new File([texto], nombre, { type: tipo });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file], title: nombre });
+      markBackup();
+      toast('Respaldo guardado ✓');
+      render();
+      return;
+    }
+  } catch (err) {
+    if (err && err.name === 'AbortError') return; // lo canceló el usuario
+    console.error(err);
+  }
+  download(nombre, texto, tipo);
+  markBackup();
+  toast('Respaldo descargado ✓');
+  render();
 }
 
 let autoAdvTimer;
@@ -818,21 +972,53 @@ function autoAdvance(input) {
   }, 800);
 }
 
+let draftTimer;
 function handleInput(e) {
   const t = e.target;
+
+  // Renombrar: lo que escribes filtra los candidatos a fusión.
+  if (t.id === 'f-rename') {
+    state.renameQuery = t.value;
+    const list = document.getElementById('rename-list');
+    if (list) list.innerHTML = buildRenameList();
+    return;
+  }
+
+  // Buscar en el historial: al escribir se quita cualquier filtro activo,
+  // para que no se quede puesto sin que te des cuenta.
   if (t.classList.contains('hist-search')) {
     state.histSearch = t.value;
+    if (t.value.trim() && (state.histGroup || state.histExercise)) {
+      state.histGroup = null;
+      state.histExercise = null;
+      const gb = document.getElementById('hist-groupbar');
+      const eb = document.getElementById('hist-exbar');
+      if (gb && state._histAll) gb.innerHTML = buildHistGroupBar(state._histAll);
+      if (eb) eb.innerHTML = '';
+    }
     const list = document.getElementById('hist-list');
     if (list && state._histAll) list.innerHTML = buildHistList(state._histAll);
     return;
   }
+
+  // Buscar ejercicio: igual, la búsqueda manda sobre el filtro de grupo.
   if (t.classList.contains('picker__search')) {
+    if (t.value.trim() && state.selectedGroup) {
+      state.selectedGroup = null;
+      const gb = document.getElementById('pick-groupbar');
+      if (gb) gb.innerHTML = buildGroupBar(null);
+    }
     const chips = document.querySelector('.chips');
     if (chips) chips.innerHTML = buildChips(t.value, state.selectedGroup);
     return;
   }
-  if (t.classList.contains('setcell__input')) {
-    autoAdvance(t);
+
+  if (t.classList.contains('setcell__input')) autoAdvance(t);
+
+  // Cualquier cambio en el formulario guarda el borrador (con pequeña espera).
+  if (t.closest && t.closest('.field, .weight, .sets')) {
+    clearTimeout(draftTimer);
+    draftTimer = setTimeout(captureDraft, 400);
   }
 }
 
@@ -869,6 +1055,41 @@ function captureDraft() {
     nota: document.getElementById('f-nota').value,
     grupo: grupoEl ? grupoEl.dataset.group : null,
   };
+  persistDraft();
+}
+
+/* Borrador en disco: sobrevive a que se cierre la app o iOS la descargue. */
+const DRAFT_KEY = 'fuerza_draft';
+function persistDraft() {
+  try {
+    if (state.draft) localStorage.setItem(DRAFT_KEY, JSON.stringify(state.draft));
+    else localStorage.removeItem(DRAFT_KEY);
+  } catch (e) { /* sin localStorage */ }
+}
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    const d = JSON.parse(raw);
+    return (d && d.exercise) ? d : null;
+  } catch (e) { return null; }
+}
+function clearDraft() {
+  state.draft = null;
+  try { localStorage.removeItem(DRAFT_KEY); } catch (e) { /* sin localStorage */ }
+}
+
+// Abre el detalle de un ejercicio sin perder lo que estabas registrando.
+function goToDetail(nombre) {
+  captureDraft();
+  state.tab = 'history';
+  state.detail = nombre;
+  state.editId = null;
+  state.renameFor = null;
+  state.histSearch = '';
+  document.querySelectorAll('.tabbar__btn').forEach((b) =>
+    b.setAttribute('aria-selected', b.dataset.tab === 'history' ? 'true' : 'false'));
+  render();
 }
 
 function switchTab(tab) {
@@ -876,6 +1097,7 @@ function switchTab(tab) {
   state.tab = tab;
   state.detail = null;
   state.editId = null;
+  state.renameFor = null;
   state.histSearch = ''; // la búsqueda del historial no persiste entre pantallas
   document.querySelectorAll('.tabbar__btn').forEach((b) =>
     b.setAttribute('aria-selected', b.dataset.tab === tab ? 'true' : 'false'));
@@ -895,6 +1117,20 @@ function init() {
   view.addEventListener('click', handleClick);
   view.addEventListener('input', handleInput);
   document.getElementById('import-input').addEventListener('change', handleImportFile);
+
+  // Guarda el borrador si iOS cierra o manda la app a segundo plano.
+  window.addEventListener('pagehide', captureDraft);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') captureDraft();
+  });
+
+  // Si quedó una serie a medio registrar, la recupera tal cual.
+  const guardado = loadDraft();
+  if (guardado) {
+    state.draft = guardado;
+    state.selectedExercise = guardado.exercise;
+    state.tab = 'log';
+  }
 
   render();
 
