@@ -281,10 +281,16 @@ body {
 
 .daygroup { margin-bottom: 22px; }
 .daygroup__head {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
   font-size: 13px; font-weight: 700; color: var(--gold);
   text-transform: capitalize; letter-spacing: 0.02em;
   margin-bottom: 10px; padding-bottom: 6px; border-bottom: 1px solid var(--line);
 }
+.daygroup__del {
+  flex: 0 0 auto; background: none; border: none; cursor: pointer;
+  color: var(--muted); font-size: 15px; line-height: 1; padding: 2px 6px;
+}
+.daygroup__del:active { color: var(--danger); }
 
 .entry {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;

@@ -168,6 +168,22 @@ const DB = (() => {
     return toUpdate.length;
   }
 
+  // Elimina todas las series de un día concreto.
+  async function deleteDay(fecha) {
+    const all = await getAll();
+    const ids = all.filter((e) => e.fecha === fecha).map((e) => e.id);
+    if (!ids.length) return 0;
+    const db = await open();
+    const tx = db.transaction(STORE, 'readwrite');
+    const os = tx.objectStore(STORE);
+    ids.forEach((id) => os.delete(id));
+    return new Promise((res, rej) => {
+      tx.oncomplete = () => res(ids.length);
+      tx.onerror = () => rej(tx.error);
+      tx.onabort = () => rej(tx.error);
+    });
+  }
+
   // Elimina un ejercicio y todas sus series.
   async function deleteExercise(name) {
     const all = await getAll();
@@ -187,7 +203,7 @@ const DB = (() => {
   return {
     put, getAll, get, remove,
     usedExercises, lastFor, historyFor,
-    renameExercise, deleteExercise, regroupExercise,
+    renameExercise, deleteExercise, regroupExercise, deleteDay,
     exportJSON, exportCSV, importJSON,
   };
 })();

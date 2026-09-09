@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------ */
 
 // Versión visible de la app (sube junto con la caché del service worker).
-const APP_VERSION = 'v14';
+const APP_VERSION = 'v15';
 
 // Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
 // cualquier ejercicio que registres pasa a mostrarse por uso reciente.
@@ -360,9 +360,14 @@ function buildHistList(all) {
     groups[idx[e.fecha]].items.push(e);
   }
 
+  const sinFiltro = !state.histGroup && !state.histExercise && !state.histSearch.trim();
+
   return groups.map((g) => `
     <section class="daygroup">
-      <h2 class="daygroup__head">${fmtDate(g.fecha, { weekday: 'long', day: 'numeric', month: 'long' })}</h2>
+      <h2 class="daygroup__head">
+        <span>${fmtDate(g.fecha, { weekday: 'long', day: 'numeric', month: 'long' })}</span>
+        ${sinFiltro ? `<button class="daygroup__del" data-action="delete-day" data-fecha="${esc(g.fecha)}" aria-label="Eliminar este día">✕</button>` : ''}
+      </h2>
       ${g.items.map((e) => `
         <div class="entry" data-action="open-detail" data-ex="${esc(e.ejercicio)}">
           <div class="entry__main">
@@ -726,6 +731,10 @@ function handleClick(e) {
       saveEdit(el.dataset.id);
       break;
 
+    case 'delete-day':
+      deleteDayPrompt(el.dataset.fecha);
+      break;
+
     case 'delete-entry':
       deleteEntry(el.dataset.id);
       break;
@@ -884,6 +893,21 @@ async function aplicarRename(destino) {
   } catch (err) {
     console.error(err);
     toast('Error al renombrar');
+  }
+}
+
+async function deleteDayPrompt(fecha) {
+  const all = state._histAll || await DB.getAll();
+  const n = all.filter((e) => e.fecha === fecha).length;
+  if (!window.confirm(`¿Eliminar las ${n} series del ${fmtDate(fecha, { weekday: 'long', day: 'numeric', month: 'long' })}?\n\nNo se puede deshacer.`)) return;
+  try {
+    const borradas = await DB.deleteDay(fecha);
+    toast(`${borradas} series eliminadas`);
+    await ensureExerciseList();
+    await render();
+  } catch (err) {
+    console.error(err);
+    toast('Error al eliminar');
   }
 }
 
