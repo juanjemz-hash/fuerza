@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------ */
 
 // Versión visible de la app (sube junto con la caché del service worker).
-const APP_VERSION = 'v16';
+const APP_VERSION = 'v17';
 
 // Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
 // cualquier ejercicio que registres pasa a mostrarse por uso reciente.
@@ -453,7 +453,7 @@ async function renderHistory() {
     : '';
 
   return backupWarn + tools + search + filters + note + `<div id="hist-list">${buildHistList(all)}</div>` +
-    `<p class="version-tag">Fuerza ${APP_VERSION}</p>`;
+    `<p class="version-tag">Fuerza ${APP_VERSION}${document.getElementById('timer') ? '' : ' · falta subir index.html'}</p>`;
 }
 
 async function renderDetail(name) {
@@ -1051,6 +1051,7 @@ function avisoRest() {
 
 function startRest(segundos) {
   if (!(state.tab === 'log' && state.selectedExercise)) return; // solo al registrar
+  if (!document.getElementById('timer')) return;               // index.html antiguo
   rest.duracion = segundos || restDuracion();
   rest.endsAt = Date.now() + rest.duracion * 1000;
   rest.paused = false;
@@ -1242,7 +1243,10 @@ function init() {
   view.addEventListener('input', handleInput);
   document.getElementById('import-input').addEventListener('change', handleImportFile);
 
-  document.getElementById('timer').addEventListener('click', handleTimer);
+  // Si el index.html fuera de una versión anterior, el cronómetro no existe:
+  // la app sigue funcionando igual, solo sin descanso.
+  const cajaTimer = document.getElementById('timer');
+  if (cajaTimer) cajaTimer.addEventListener('click', handleTimer);
 
   // Guarda el borrador si iOS cierra o manda la app a segundo plano.
   window.addEventListener('pagehide', captureDraft);
