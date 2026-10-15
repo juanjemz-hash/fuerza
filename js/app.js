@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------ */
 
 // Versión visible de la app (sube junto con la caché del service worker).
-const APP_VERSION = 'v17';
+const APP_VERSION = 'v18';
 
 // Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
 // cualquier ejercicio que registres pasa a mostrarse por uso reciente.
@@ -1027,11 +1027,24 @@ function pintarRest() {
   fill.style.width = hecho ? '0%' : Math.min(100, (restante / rest.duracion) * 100) + '%';
   caja.classList.toggle('is-done', hecho);
   caja.classList.toggle('is-paused', rest.paused && !hecho);
-  if (hecho && rest.tick) { clearInterval(rest.tick); rest.tick = null; avisoRest(); }
+  if (hecho && rest.tick) { clearInterval(rest.tick); rest.tick = null; avisoRest(); mantenerPantalla(false); }
 }
 
-// Pitido corto. El toque que arranca el descanso desbloquea el audio en iOS.
-function avisoRest() {
+/* --- cómo avisa al terminar el descanso: silencioso por defecto --- */
+
+const AVISO_KEY = 'fuerza_aviso';
+function avisoModo() {
+  try { return localStorage.getItem(AVISO_KEY) === 'sonido' ? 'sonido' : 'silencio'; }
+  catch (e) { return 'silencio'; }
+}
+function setAvisoModo(m) {
+  try { localStorage.setItem(AVISO_KEY, m); } catch (e) { /* sin localStorage */ }
+}
+function puedeNotificar() {
+  return typeof Notification !== 'undefined' && Notification.permission === 'granted';
+}
+
+function pitido() {
   try {
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return;
@@ -1046,7 +1059,61 @@ function avisoRest() {
     osc.start(); osc.stop(ctx.currentTime + 0.5);
     setTimeout(() => ctx.close().catch(() => {}), 900);
   } catch (e) { /* sin audio */ }
+}
+
+function avisoRest() {
+  // Notificación silenciosa (iOS 16.4+, solo con la app en la pantalla de inicio)
+  if (puedeNotificar() && navigator.serviceWorker) {
+    navigator.serviceWorker.ready.then((reg) => {
+      reg.showNotification('Descanso terminado', {
+        body: state.selectedExercise ? 'Siguiente serie · ' + state.selectedExercise : 'A por la siguiente serie',
+        icon: './icons/icon-192.png',
+        badge: './icons/icon-192.png',
+        tag: 'fuerza-descanso',   // sustituye el aviso anterior, no los acumula
+        silent: true,
+        renotify: false,
+      });
+    }).catch(() => { /* sin service worker */ });
+  }
+  if (avisoModo() === 'sonido') pitido();
+  // En iPhone no hay vibración desde web; en Android sí.
   if (navigator.vibrate) { try { navigator.vibrate([120, 60, 120]); } catch (e) { /* ignora */ } }
+}
+
+async function pedirPermisoAviso() {
+  if (typeof Notification === 'undefined') { toast('Tu navegador no admite avisos'); return; }
+  try {
+    const r = await Notification.requestPermission();
+    if (r === 'granted') toast('Avisos activados ✓');
+    else toast('Avisos no permitidos');
+  } catch (e) { toast('No se pudo activar'); }
+  pintarAvisoBtn();
+}
+
+// Mantiene la pantalla encendida mientras descansas, para no perderte el aviso.
+let wakeLock = null;
+async function mantenerPantalla(on) {
+  try {
+    if (on) {
+      if (!wakeLock && navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen');
+    } else if (wakeLock) {
+      await wakeLock.release();
+      wakeLock = null;
+    }
+  } catch (e) { wakeLock = null; /* no soportado o denegado */ }
+}
+
+function pintarAvisoBtn() {
+  const btn = document.getElementById('timer-aviso');
+  if (!btn) return;
+  const sinPermiso = typeof Notification !== 'undefined' && Notification.permission === 'default';
+  if (sinPermiso) {
+    btn.textContent = 'Activar aviso';
+    btn.classList.add('timer__aviso--pedir');
+  } else {
+    btn.textContent = avisoModo() === 'sonido' ? '🔔' : '🔕';
+    btn.classList.remove('timer__aviso--pedir');
+  }
 }
 
 function startRest(segundos) {
@@ -1060,12 +1127,15 @@ function startRest(segundos) {
   document.body.classList.add('has-timer');
   if (rest.tick) clearInterval(rest.tick);
   rest.tick = setInterval(pintarRest, 250);
+  mantenerPantalla(true);
+  pintarAvisoBtn();
   pintarRest();
 }
 
 function cerrarRest() {
   if (rest.tick) { clearInterval(rest.tick); rest.tick = null; }
   rest.paused = false;
+  mantenerPantalla(false);
   const caja = document.getElementById('timer');
   if (caja) { caja.hidden = true; caja.classList.remove('is-done', 'is-paused'); }
   document.body.classList.remove('has-timer');
@@ -1077,6 +1147,17 @@ function handleTimer(e) {
   const acc = el.dataset.timer;
 
   if (acc === 'cerrar') { cerrarRest(); return; }
+
+  if (acc === 'aviso') {
+    if (typeof Notification !== 'undefined' && Notification.permission === 'default') {
+      pedirPermisoAviso();           // el toque es el gesto que iOS exige
+    } else {
+      setAvisoModo(avisoModo() === 'sonido' ? 'silencio' : 'sonido');
+      toast(avisoModo() === 'sonido' ? 'Aviso con sonido' : 'Aviso silencioso');
+      pintarAvisoBtn();
+    }
+    return;
+  }
 
   if (acc === 'toggle') {
     if (rest.paused) { rest.endsAt = Date.now() + rest.left * 1000; rest.paused = false; rest.tick = rest.tick || setInterval(pintarRest, 250); }
@@ -1252,7 +1333,10 @@ function init() {
   window.addEventListener('pagehide', captureDraft);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') captureDraft();
-    else pintarRest(); // al volver, la cuenta se recalcula sola por la hora de fin
+    else {
+      pintarRest(); // al volver, la cuenta se recalcula sola por la hora de fin
+      if (rest.tick) mantenerPantalla(true); // iOS suelta el bloqueo al salir; se repide
+    }
   });
 
   // Si quedó una serie a medio registrar, la recupera tal cual.

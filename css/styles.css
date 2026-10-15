@@ -400,6 +400,8 @@ body.has-timer .toast { bottom: calc(var(--tabbar-h) + env(safe-area-inset-botto
   padding: 0;
 }
 .timer__close { border-color: transparent; color: var(--muted); font-size: 15px; padding: 7px 8px; }
+.timer__aviso { font-size: 15px; padding: 7px 9px; }
+.timer__aviso--pedir { font-size: 12px; padding: 7px 11px; border-color: var(--gold); color: var(--gold); }
 .timer.is-done .timer__fill { background: rgba(109,190,134,0.22); }
 .timer.is-done .timer__time { color: var(--good); }
 .timer.is-paused .timer__time { color: var(--muted); }

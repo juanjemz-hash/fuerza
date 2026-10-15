@@ -1,7 +1,7 @@
 /* Service worker — "red primero": si hay conexión, siempre sirve la última versión;
    la caché es solo el respaldo para funcionar sin conexión (en el gym).
    Así las actualizaciones entran solas al reabrir con conexión. */
-const CACHE = 'fuerza-v17';
+const CACHE = 'fuerza-v18';
 const ASSETS = [
   './',
   './index.html',
@@ -43,5 +43,16 @@ self.addEventListener('fetch', (event) => {
         return res;
       })
       .catch(() => caches.match(request).then((cached) => cached || caches.match('./index.html')))
+  );
+});
+
+// Tocar el aviso de descanso abre la app en vez de no hacer nada.
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((lista) => {
+      for (const c of lista) { if ('focus' in c) return c.focus(); }
+      if (self.clients.openWindow) return self.clients.openWindow('./index.html');
+    })
   );
 });
