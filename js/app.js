@@ -3,7 +3,7 @@
  * ------------------------------------------------------------------ */
 
 // Versión visible de la app (sube junto con la caché del service worker).
-const APP_VERSION = 'v15';
+const APP_VERSION = 'v16';
 
 // Ejercicios por grupo muscular. Bootstrapea el selector la primera vez;
 // cualquier ejercicio que registres pasa a mostrarse por uso reciente.
@@ -987,13 +987,113 @@ function focusNextSet(input) {
   if (next) next.focus();
 }
 // Auto-avanza a la siguiente serie: al instante con 2 cifras (10, 12…); con 1 cifra tras una breve pausa.
+// En el mismo momento arranca el descanso, que es cuando de verdad terminas la serie.
 function autoAdvance(input) {
   clearTimeout(autoAdvTimer);
   const len = input.value.length;
-  if (len >= 2) focusNextSet(input);
+  if (len >= 2) { focusNextSet(input); startRest(); }
   else if (len === 1) autoAdvTimer = setTimeout(() => {
     if (document.activeElement === input) focusNextSet(input);
+    startRest();
   }, 800);
+}
+
+/* ---------------------- descanso entre series ---------------------- */
+
+const REST_KEY = 'fuerza_rest';
+const rest = { endsAt: 0, left: 0, paused: false, tick: null, duracion: 120 };
+
+function restDuracion() {
+  try {
+    const v = parseInt(localStorage.getItem(REST_KEY), 10);
+    if (v >= 15 && v <= 600) return v;
+  } catch (e) { /* sin localStorage */ }
+  return 120;
+}
+
+function fmtReloj(seg) {
+  const s = Math.max(0, Math.round(seg));
+  return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+}
+
+function pintarRest() {
+  const caja = document.getElementById('timer');
+  const txt = document.getElementById('timer-time');
+  const fill = document.getElementById('timer-fill');
+  if (!caja || !txt || !fill) return;
+  const restante = rest.paused ? rest.left : (rest.endsAt - Date.now()) / 1000;
+  const hecho = restante <= 0;
+  txt.textContent = hecho ? '¡Vamos!' : fmtReloj(restante);
+  fill.style.width = hecho ? '0%' : Math.min(100, (restante / rest.duracion) * 100) + '%';
+  caja.classList.toggle('is-done', hecho);
+  caja.classList.toggle('is-paused', rest.paused && !hecho);
+  if (hecho && rest.tick) { clearInterval(rest.tick); rest.tick = null; avisoRest(); }
+}
+
+// Pitido corto. El toque que arranca el descanso desbloquea el audio en iOS.
+function avisoRest() {
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.45);
+    osc.start(); osc.stop(ctx.currentTime + 0.5);
+    setTimeout(() => ctx.close().catch(() => {}), 900);
+  } catch (e) { /* sin audio */ }
+  if (navigator.vibrate) { try { navigator.vibrate([120, 60, 120]); } catch (e) { /* ignora */ } }
+}
+
+function startRest(segundos) {
+  if (!(state.tab === 'log' && state.selectedExercise)) return; // solo al registrar
+  rest.duracion = segundos || restDuracion();
+  rest.endsAt = Date.now() + rest.duracion * 1000;
+  rest.paused = false;
+  const caja = document.getElementById('timer');
+  if (caja) caja.hidden = false;
+  document.body.classList.add('has-timer');
+  if (rest.tick) clearInterval(rest.tick);
+  rest.tick = setInterval(pintarRest, 250);
+  pintarRest();
+}
+
+function cerrarRest() {
+  if (rest.tick) { clearInterval(rest.tick); rest.tick = null; }
+  rest.paused = false;
+  const caja = document.getElementById('timer');
+  if (caja) { caja.hidden = true; caja.classList.remove('is-done', 'is-paused'); }
+  document.body.classList.remove('has-timer');
+}
+
+function handleTimer(e) {
+  const el = e.target.closest('[data-timer]');
+  if (!el) return;
+  const acc = el.dataset.timer;
+
+  if (acc === 'cerrar') { cerrarRest(); return; }
+
+  if (acc === 'toggle') {
+    if (rest.paused) { rest.endsAt = Date.now() + rest.left * 1000; rest.paused = false; rest.tick = rest.tick || setInterval(pintarRest, 250); }
+    else { rest.left = Math.max(0, (rest.endsAt - Date.now()) / 1000); rest.paused = true; }
+    pintarRest();
+    return;
+  }
+
+  // −15 / +15: ajusta este descanso y recuerda la duración para los siguientes
+  const delta = (acc === 'mas' ? 15 : -15);
+  if (rest.paused) rest.left = Math.max(0, rest.left + delta);
+  else rest.endsAt = Math.max(Date.now(), rest.endsAt + delta * 1000);
+  rest.duracion = Math.min(600, Math.max(15, rest.duracion + delta));
+  try { localStorage.setItem(REST_KEY, String(rest.duracion)); } catch (err) { /* sin localStorage */ }
+  if (!rest.tick) rest.tick = setInterval(pintarRest, 250);
+  const caja = document.getElementById('timer');
+  if (caja) caja.classList.remove('is-done');
+  pintarRest();
 }
 
 let draftTimer;
@@ -1142,10 +1242,13 @@ function init() {
   view.addEventListener('input', handleInput);
   document.getElementById('import-input').addEventListener('change', handleImportFile);
 
+  document.getElementById('timer').addEventListener('click', handleTimer);
+
   // Guarda el borrador si iOS cierra o manda la app a segundo plano.
   window.addEventListener('pagehide', captureDraft);
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') captureDraft();
+    else pintarRest(); // al volver, la cuenta se recalcula sola por la hora de fin
   });
 
   // Si quedó una serie a medio registrar, la recupera tal cual.

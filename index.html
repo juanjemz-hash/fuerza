@@ -45,6 +45,16 @@
     </button>
   </nav>
 
+  <div id="timer" class="timer" hidden>
+    <div id="timer-fill" class="timer__fill"></div>
+    <div class="timer__row">
+      <button class="timer__btn" data-timer="menos" aria-label="Restar 15 segundos">−15</button>
+      <button class="timer__time num" id="timer-time" data-timer="toggle" aria-label="Pausar o reanudar">0:00</button>
+      <button class="timer__btn" data-timer="mas" aria-label="Sumar 15 segundos">+15</button>
+      <button class="timer__btn timer__close" data-timer="cerrar" aria-label="Cerrar descanso">✕</button>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
   <input type="file" id="import-input" accept="application/json" hidden />

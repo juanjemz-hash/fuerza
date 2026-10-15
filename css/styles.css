@@ -63,6 +63,7 @@ body {
 .view {
   padding: calc(var(--topbar-h) + env(safe-area-inset-top) + 16px) 16px
            calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 24px);
+  transition: padding-bottom .15s;
   max-width: 640px;
   margin: 0 auto;
 }
@@ -357,6 +358,51 @@ body {
 .tabbar__btn[aria-selected="true"] { color: var(--gold); }
 .tabbar__icon { font-size: 22px; line-height: 1; }
 .tabbar__label { font-size: 11px; font-weight: 600; }
+
+/* deja sitio al cronómetro cuando está abierto */
+body.has-timer .view { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 80px); }
+body.has-timer .toast { bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + 72px); }
+
+/* ---------- Cronómetro de descanso ---------- */
+.timer {
+  position: fixed;
+  bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom));
+  left: 0; right: 0;
+  background: var(--ink-2);
+  border-top: 1px solid var(--line);
+  z-index: 30;
+  overflow: hidden;
+}
+.timer[hidden] { display: none; }
+.timer__fill {
+  position: absolute; inset: 0 auto 0 0;
+  background: var(--gold-soft);
+  width: 100%;
+  transition: width .25s linear;
+}
+.timer__row {
+  position: relative;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+}
+.timer__btn {
+  flex: 0 0 auto;
+  background: none; border: 1px solid var(--line); border-radius: 999px;
+  color: var(--paper); font-size: 13px; font-weight: 700;
+  padding: 7px 12px; cursor: pointer; font-family: var(--font);
+}
+.timer__btn:active { background: var(--ink-3); }
+.timer__time {
+  flex: 1; text-align: center;
+  background: none; border: none; cursor: pointer;
+  color: var(--gold); font-size: 26px; font-weight: 800;
+  letter-spacing: -0.01em; font-family: var(--font);
+  padding: 0;
+}
+.timer__close { border-color: transparent; color: var(--muted); font-size: 15px; padding: 7px 8px; }
+.timer.is-done .timer__fill { background: rgba(109,190,134,0.22); }
+.timer.is-done .timer__time { color: var(--good); }
+.timer.is-paused .timer__time { color: var(--muted); }
 
 /* ---------- Toast ---------- */
 .toast {
